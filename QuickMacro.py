@@ -19,6 +19,20 @@ from core.actions import parse_action_line as action_parse_line, compose_action_
 ######################################################################
 # Helpers
 ######################################################################
+def wait_until_or_stop(until_ts, stop_event, quantum=0.01):
+    """Cooperative wait until timestamp or stop event set.
+    Returns True if reached time, False if stopped early.
+    """
+    try:
+        while True:
+            if stop_event.is_set():
+                return False
+            now = time.time()
+            if now >= until_ts:
+                return True
+            time.sleep(min(quantum, max(0.0, until_ts - now)))
+    except Exception:
+        return False
 def get_screen_size():
     try:
         user32 = ctypes.windll.user32
@@ -459,9 +473,8 @@ class KeyboardActionExecute(threading.Thread):
                             except Exception:
                                 t_ms = 0
                             target = start_ts + (t_ms/1000.0)
-                            delay = target - time.time()
-                            if delay > 0:
-                                time.sleep(delay)
+                            if not wait_until_or_stop(target, ev_stop_execute_keyboard):
+                                break
                             try:
                                 vk = int(d.get('vk') or 0)
                                 if d.get('op') == 'DOWN':
@@ -552,9 +565,8 @@ class MouseActionExecute(threading.Thread):
                             except Exception:
                                 t_ms = 0
                             target = start_ts + (t_ms/1000.0)
-                            delay = target - time.time()
-                            if delay > 0:
-                                time.sleep(delay)
+                            if not wait_until_or_stop(target, ev_stop_execute_mouse):
+                                break
                             if d.get('op') == 'MOVE':
                                 try:
                                     x = int(d.get('x') or 0); y = int(d.get('y') or 0)
