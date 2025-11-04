@@ -17,6 +17,7 @@ from pynput.mouse import Button, Controller as MouseController
 from core.actions import parse_action_line as action_parse_line, compose_action_line as action_compose_line, extract_meta as action_extract_meta
 from core.replayer import Replayer
 from core.recorder import Recorder
+from core.utils import get_screen_size
 from core import settings as settings_mod
 
 ######################################################################
@@ -34,21 +35,6 @@ def wait_until_or_stop(until_ts, stop_event, quantum=0.01):
             time.sleep(min(quantum, max(0.0, until_ts - now)))
     except Exception:
         return False
-def get_screen_size():
-    try:
-        user32 = ctypes.windll.user32
-        return int(user32.GetSystemMetrics(0)), int(user32.GetSystemMetrics(1))
-    except Exception:
-        try:
-            # Fallback via tkinter if available
-            t = tkinter.Tk()
-            w = int(t.winfo_screenwidth())
-            h = int(t.winfo_screenheight())
-            t.destroy()
-            return w, h
-        except Exception:
-            return 1920, 1080
-
 def set_process_dpi_aware():
     try:
         ctypes.windll.user32.SetProcessDPIAware()
@@ -98,16 +84,7 @@ def init_new_action_file():
     except Exception:
         pass
 
-record_write_lock = threading.Lock()
-
-def write_action_line(line):
-    global action_file_name
-    try:
-        with record_write_lock:
-            with open(action_file_name, 'a', encoding='utf-8') as f:
-                f.write(line + "\n")
-    except Exception:
-        pass
+# Legacy recording writer removed; core.recorder handles writing
 
 def ensure_assets_dir():
     p = Path('assets')
@@ -232,9 +209,7 @@ def command_adapter(action):
             except Exception:
                 pass
             # UI updates
-            startListenerBtn['state'] = 'disabled'
-            startExecuteBtn['state'] = 'disabled'
-            startListenerBtn['text'] = 'Recording, "ESC/F10" to stop.'
+            update_ui_for_state(AppState.RECORDING)
             # start recorder (keyboard + mouse) and listen controller for ESC
             try:
                 global current_recorder
@@ -273,9 +248,7 @@ def command_adapter(action):
             except Exception:
                 pass
             # UI updates
-            startListenerBtn['state'] = 'disabled'
-            startExecuteBtn['state'] = 'disabled'
-            startExecuteBtn['text'] = 'Replaying, "ESC/F11" to stop.'
+            update_ui_for_state(AppState.REPLAYING)
             # start replayer (keyboard + mouse) and controller (ESC monitor)
             try:
                 global current_replayer
@@ -305,48 +278,8 @@ class KeyboardActionListener(threading.Thread):
         self.file_name = file_name
 
     def run(self):
-        # press keyboard
-        def on_press(key):
-            global record_start_time
-            # ignore control hotkeys and ESC in recording
-            if key in (keyboard.Key.esc, keyboard.Key.f10, keyboard.Key.f11):
-                return
-            t = int((time.time() - record_start_time) * 1000)
-            try:
-                vk = key.vk
-            except AttributeError:
-                vk = key.value.vk
-            write_action_line(f"K DOWN {vk} {t}")
-
-        # release keyboard
-        def on_release(key):
-            global can_start_listening
-            global can_start_executing
-            global ev_stop_listen
-            global record_start_time
-
-            if key == keyboard.Key.esc:
-                # Stop by pressing "ESC"
-                try:
-                    ev_stop_listen.set()
-                except Exception:
-                    pass
-                keyboardListener.stop()
-                return False
-
-            if not ev_stop_listen.is_set():
-                # ignore control hotkeys in recording
-                if key in (keyboard.Key.f10, keyboard.Key.f11):
-                    return
-                t = int((time.time() - record_start_time) * 1000)
-                try:
-                    vk = key.vk
-                except AttributeError:
-                    vk = key.value.vk
-                write_action_line(f"K UP {vk} {t}")
-        
-        with keyboard.Listener(on_press=on_press, on_release=on_release) as keyboardListener:
-            keyboardListener.join()          
+        # Deprecated: use core.recorder.Recorder
+        return
                 
 
 class MouseActionListener(threading.Thread):
@@ -357,54 +290,8 @@ class MouseActionListener(threading.Thread):
         self.file_name = file_name
 
     def run(self):
-        # record-time screen size
-        sw, sh = get_screen_size()
-        # move mouse
-        def on_move(x, y):
-            global ev_stop_listen, record_start_time
-            if ev_stop_listen.is_set():
-                mouseListener.stop()
-            t = int((time.time() - record_start_time) * 1000)
-            try:
-                nx = float(x) / float(sw)
-                ny = float(y) / float(sh)
-            except Exception:
-                nx = None
-                ny = None
-            if nx is not None and ny is not None:
-                write_action_line(f"M MOVE {int(x)} {int(y)} {nx:.6f} {ny:.6f} {t}")
-            else:
-                write_action_line(f"M MOVE {int(x)} {int(y)} {t}")
-
-        # click mouse
-        def on_click(x, y, button, pressed):
-            global ev_stop_listen, record_start_time
-            if ev_stop_listen.is_set():
-                mouseListener.stop()
-            t = int((time.time() - record_start_time) * 1000)
-            btn = 'left' if button == Button.left else 'right'
-            try:
-                nx = float(x) / float(sw)
-                ny = float(y) / float(sh)
-            except Exception:
-                nx = None
-                ny = None
-            act = 'DOWN' if pressed else 'UP'
-            if nx is not None and ny is not None:
-                write_action_line(f"M CLICK {btn} {act} {int(x)} {int(y)} {nx:.6f} {ny:.6f} {t}")
-            else:
-                write_action_line(f"M CLICK {btn} {act} {int(x)} {int(y)} {t}")
-
-        # scroll mouse
-        def on_scroll(x, y, x_axis, y_axis):
-            global ev_stop_listen, record_start_time
-            if ev_stop_listen.is_set():
-                mouseListener.stop()
-            t = int((time.time() - record_start_time) * 1000)
-            write_action_line(f"M SCROLL {int(x_axis)} {int(y_axis)} {t}")
-
-        with mouse.Listener(on_move=on_move, on_click=on_click, on_scroll=on_scroll) as mouseListener:
-            mouseListener.join()                
+        # Deprecated: use core.recorder.Recorder
+        return
 
 
 ######################################################################
@@ -658,9 +545,7 @@ class ListenController(threading.Thread):
                     pass
                 can_start_listening = True
                 can_start_executing = True
-                startListenerBtn['text'] = 'Start recording (F10)'
-                startListenerBtn['state'] = 'normal'
-                startExecuteBtn['state'] = 'normal'
+                update_ui_for_state(AppState.IDLE)
                 keyboardListener.stop()
 
         with keyboard.Listener(on_release=on_release) as keyboardListener:
@@ -702,9 +587,7 @@ class ExecuteController(threading.Thread):
         # Reset UI and states once everything is done
         can_start_listening = True
         can_start_executing = True
-        startExecuteBtn['text'] = 'Start replaying (F11)'
-        startListenerBtn['state'] = 'normal'
-        startExecuteBtn['state'] = 'normal'
+        update_ui_for_state(AppState.IDLE)
         keyboardListener.stop()
 
 
@@ -779,6 +662,11 @@ class HotkeyController(threading.Thread):
 # GUI
 ######################################################################
 if __name__ == '__main__':
+    # Logging setup
+    try:
+        logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s %(message)s')
+    except Exception:
+        pass
     # Ensure DPI awareness before creating Tk to avoid window size jumps
     set_process_dpi_aware()
 
@@ -902,6 +790,27 @@ if __name__ == '__main__':
     # start replaying button centered in card
     startExecuteBtn = ttk.Button(replayCard, text="Start replaying (F11)", command=lambda: command_adapter('execute'), style='Center.TButton')
     startExecuteBtn.place(x=15, y=60, width=280, height=40)
+
+    # UI state helper
+    class AppState:
+        IDLE = 'idle'
+        RECORDING = 'recording'
+        REPLAYING = 'replaying'
+
+    def update_ui_for_state(state: str):
+        if state == AppState.IDLE:
+            startListenerBtn['state'] = 'normal'
+            startExecuteBtn['state'] = 'normal'
+            startListenerBtn['text'] = 'Start recording (F10)'
+            startExecuteBtn['text'] = 'Start replaying (F11)'
+        elif state == AppState.RECORDING:
+            startListenerBtn['state'] = 'disabled'
+            startExecuteBtn['state'] = 'disabled'
+            startListenerBtn['text'] = 'Recording, "ESC/F10" to stop.'
+        elif state == AppState.REPLAYING:
+            startListenerBtn['state'] = 'disabled'
+            startExecuteBtn['state'] = 'disabled'
+            startExecuteBtn['text'] = 'Replaying, "ESC/F11" to stop.'
 
     actionFileVar = tkinter.StringVar()
     files = list_action_files()
