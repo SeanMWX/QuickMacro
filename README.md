@@ -7,13 +7,30 @@ Quick Macro to record and replay mouse and keyboard actions (Tkinter + pynput).
 
 ## Run
 - Start the GUI: `python QuickMacro.py`
-- Record: set the countdown and click `Start recording` (ESC to stop)
-- Replay: choose what to replay (mouse/keyboard), set countdown and repeat times, click `Start replaying` (ESC to stop)
+- Record: click `Start recording` or press `F10` to start immediately (ESC/F10 to stop)
+- Replay: select an `.action` from dropdown, set repeat times, click `Start replaying` or press `F11` to start immediately (ESC/F11 to stop)
+- Hotkeys: `F10` start/stop recording, `F11` start/stop replaying
+
+## Action Files (.action)
+- When recording, the app now creates a single `.action` file using a timestamp name like `YYYYMMDD-HHMMSS.action`.
+- The format is a simple, line-based pseudo language with timing:
+  - `# QuickMacro action v1` header
+  - `META SCREEN <w> <h>` record-time screen
+  - Keyboard: `K DOWN <vk> <ms>`, `K UP <vk> <ms>`
+  - Mouse move: `M MOVE <x> <y> [<nx> <ny>] <ms>`
+  - Mouse click: `M CLICK <left|right> <DOWN|UP> <x> <y> [<nx> <ny>] <ms>`
+  - Mouse scroll: `M SCROLL <dx> <dy> <ms>`
+- In the GUI, select which `.action` to replay from the dropdown and use Refresh to reload the list.
 
 ## Fixes in this update
 - Execute phase UI is now coordinated centrally to avoid early reset when mouse and keyboard speeds differ.
 - When only replaying mouse, the replay button text updates correctly after countdown.
 - Mouse recording now stores normalized coordinates and a meta line with the record-time screen size; playback scales to the current DPI/screen size and moves to the exact click point before pressing.
+ - Record/Replay now always include both mouse and keyboard; options removed.
+ - To maximize precision, playback prefers recorded raw pixel coordinates when resolution is unchanged; it falls back to normalized coordinates only when resolution/DPI changed.
+ - On stopping/exit, any keys or mouse buttons still held down by the macro are safely released to prevent auto-repeat.
+ - Window size stabilized by setting DPI awareness at startup; background threads are daemonized and window close exits cleanly.
+ - Removed all countdown flows; actions start immediately via button or hotkey.
 
 ## Known / Future Work
 - Refactoring still needed to decouple UI, controller and workers more cleanly.
