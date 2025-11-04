@@ -111,6 +111,71 @@ def ensure_assets_dir():
     except Exception:
         pass
 
+######################################################################
+# Settings persistence
+######################################################################
+SETTINGS_PATH = 'settings.json'
+
+def load_settings():
+    try:
+        if os.path.exists(SETTINGS_PATH):
+            with open(SETTINGS_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+    except Exception:
+        pass
+    return {}
+
+def save_settings():
+    try:
+        data = {}
+        # collect current UI state if available
+        if 'playCount' in globals():
+            try:
+                data['play_count'] = int(playCount.get())
+            except Exception:
+                data['play_count'] = 1
+        if 'infiniteRepeatVar' in globals():
+            try:
+                data['infinite'] = bool(infiniteRepeatVar.get())
+            except Exception:
+                data['infinite'] = False
+        if 'actionFileVar' in globals():
+            val = actionFileVar.get().strip()
+            if val:
+                data['last_action'] = val
+        # write file
+        with open(SETTINGS_PATH, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def apply_settings_to_ui(settings: dict):
+    try:
+        if not isinstance(settings, dict):
+            return
+        if 'play_count' in settings and 'playCount' in globals():
+            try:
+                playCount.set(int(settings.get('play_count', 1)))
+            except Exception:
+                pass
+        if 'infinite' in settings and 'infiniteRepeatVar' in globals():
+            try:
+                infiniteRepeatVar.set(bool(settings.get('infinite', False)))
+            except Exception:
+                pass
+        if 'last_action' in settings and 'actionFileVar' in globals():
+            last = settings.get('last_action', '').strip()
+            files = list_action_files()
+            if last and last in files:
+                try:
+                    actionFileVar.set(last)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
 # Sync the Combobox to point at the current recording file
 def select_current_action_in_dropdown():
     try:
@@ -126,6 +191,11 @@ def select_current_action_in_dropdown():
                 actionFileVar.set(name)
             elif files2:
                 actionFileVar.set(files2[-1])
+        # persist settings when selection changes
+        try:
+            save_settings()
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -865,6 +935,32 @@ if __name__ == '__main__':
 
     # Refresh button removed; list auto-updates after recording
     
+    # 加载设置并应用
+    try:
+        _settings = load_settings()
+        apply_settings_to_ui(_settings)
+    except Exception:
+        pass
+    # 变更即保存
+    try:
+        playCount.trace_add('write', lambda *_: save_settings())
+    except Exception:
+        try:
+            playCount.trace('w', lambda *_: save_settings())
+        except Exception:
+            pass
+    try:
+        infiniteRepeatVar.trace_add('write', lambda *_: save_settings())
+    except Exception:
+        try:
+            infiniteRepeatVar.trace('w', lambda *_: save_settings())
+        except Exception:
+            pass
+    try:
+        actionFileSelect.bind('<<ComboboxSelected>>', lambda *_: save_settings())
+    except Exception:
+        pass
+    
     # Editor for .action files (Excel-like simple table: line number + text)
     def resolve_selected_action_path():
         try:
@@ -1250,19 +1346,29 @@ if __name__ == '__main__':
                 return 0, 0
             target = tree.identify_row(event.y)
             if target:
-                x, y, w, h = tree.bbox(target)
-                above = event.y < (y + h/2)
                 idx = tree.index(target)
-                insert_at = idx if above else idx + 1
-                line_y = y if above else y + h
+                bbox = tree.bbox(target)
+                if bbox and len(bbox) == 4:
+                    x, y, w, h = bbox
+                    above = event.y < (y + h/2)
+                    insert_at = idx if above else idx + 1
+                    line_y = y if above else y + h
+                else:
+                    # target may be scrolled out or bbox unavailable; fall back to cursor y
+                    h_widget = max(0, tree.winfo_height())
+                    insert_at = idx
+                    line_y = max(0, min(event.y, h_widget))
                 return insert_at, line_y
-            # outside rows
+            # outside rows: use first/last bbox if available, else fall back to widget bounds
             first_bbox = tree.bbox(children[0])
             last_bbox = tree.bbox(children[-1])
-            if event.y < first_bbox[1]:
-                return 0, first_bbox[1]
+            fy = first_bbox[1] if first_bbox and len(first_bbox) == 4 else 0
+            ly = last_bbox[1] if last_bbox and len(last_bbox) == 4 else max(0, tree.winfo_height() - 1)
+            lh = last_bbox[3] if last_bbox and len(last_bbox) == 4 else 0
+            if event.y < fy:
+                return 0, fy
             else:
-                return len(children), last_bbox[1] + last_bbox[3]
+                return len(children), ly + lh
 
         def on_tree_motion(event):
             nonlocal drag_insert_index, dragging_selection, last_drag_y, drag_scroll_job
@@ -1481,6 +1587,10 @@ if __name__ == '__main__':
             ev_stop_execute_keyboard.set()
             ev_stop_execute_mouse.set()
             ev_stop_listen.set()
+        except Exception:
+            pass
+        try:
+            save_settings()
         except Exception:
             pass
         release_all_inputs()
