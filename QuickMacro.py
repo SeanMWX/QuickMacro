@@ -15,19 +15,20 @@ from pynput import keyboard, mouse
 from pynput.keyboard import Controller as KeyBoardController, KeyCode, Key
 from pynput.mouse import Button, Controller as MouseController
 from core.actions import parse_action_line as action_parse_line, compose_action_line as action_compose_line, extract_meta as action_extract_meta
+from core.replayer import Replayer
+from core.recorder import Recorder
+from core import settings as settings_mod
 
 ######################################################################
 # Helpers
 ######################################################################
 def wait_until_or_stop(until_ts, stop_event, quantum=0.01):
-    """Cooperative wait until timestamp or stop event set.
-    Returns True if reached time, False if stopped early.
-    """
+    """使用单调时钟的可中断等待：到达时间返回 True，途中停止返回 False"""
     try:
         while True:
             if stop_event.is_set():
                 return False
-            now = time.time()
+            now = time.monotonic()
             if now >= until_ts:
                 return True
             time.sleep(min(quantum, max(0.0, until_ts - now)))
@@ -126,67 +127,34 @@ def ensure_assets_dir():
         pass
 
 ######################################################################
-# Settings persistence
+# Settings persistence (delegate to core.settings)
 ######################################################################
 SETTINGS_PATH = 'settings.json'
 
 def load_settings():
-    try:
-        if os.path.exists(SETTINGS_PATH):
-            with open(SETTINGS_PATH, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    return data
-    except Exception:
-        pass
-    return {}
+    return settings_mod.load_settings(SETTINGS_PATH)
 
 def save_settings():
+    data = {}
     try:
-        data = {}
-        # collect current UI state if available
-        if 'playCount' in globals():
-            try:
-                data['play_count'] = int(playCount.get())
-            except Exception:
-                data['play_count'] = 1
-        if 'infiniteRepeatVar' in globals():
-            try:
-                data['infinite'] = bool(infiniteRepeatVar.get())
-            except Exception:
-                data['infinite'] = False
-        if 'actionFileVar' in globals():
-            val = actionFileVar.get().strip()
-            if val:
-                data['last_action'] = val
-        # write file
-        with open(SETTINGS_PATH, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        data['play_count'] = int(playCount.get())
+    except Exception:
+        data['play_count'] = 1
+    try:
+        data['infinite'] = bool(infiniteRepeatVar.get())
+    except Exception:
+        data['infinite'] = False
+    try:
+        val = actionFileVar.get().strip()
+        if val:
+            data['last_action'] = val
     except Exception:
         pass
+    settings_mod.save_settings(data, SETTINGS_PATH)
 
 def apply_settings_to_ui(settings: dict):
     try:
-        if not isinstance(settings, dict):
-            return
-        if 'play_count' in settings and 'playCount' in globals():
-            try:
-                playCount.set(int(settings.get('play_count', 1)))
-            except Exception:
-                pass
-        if 'infinite' in settings and 'infiniteRepeatVar' in globals():
-            try:
-                infiniteRepeatVar.set(bool(settings.get('infinite', False)))
-            except Exception:
-                pass
-        if 'last_action' in settings and 'actionFileVar' in globals():
-            last = settings.get('last_action', '').strip()
-            files = list_action_files()
-            if last and last in files:
-                try:
-                    actionFileVar.set(last)
-                except Exception:
-                    pass
+        settings_mod.apply_settings_to_ui(settings, playCount, infiniteRepeatVar, actionFileVar, list_action_files)
     except Exception:
         pass
 
@@ -246,6 +214,7 @@ def command_adapter(action):
     global can_start_executing
     global execute_time_keyboard
     global execute_time_mouse
+    global action_file_name
     
     # command list
     custom_thread_list = []
@@ -266,14 +235,14 @@ def command_adapter(action):
             startListenerBtn['state'] = 'disabled'
             startExecuteBtn['state'] = 'disabled'
             startListenerBtn['text'] = 'Recording, "ESC/F10" to stop.'
-            # threads
-            custom_thread_list = [
-                {'obj_thread': ListenController()},
-                {'obj_thread': MouseActionListener()},
-                {'obj_thread': KeyboardActionListener()}
-            ]
-            for t in custom_thread_list:
-                t['obj_thread'].start()
+            # start recorder (keyboard + mouse) and listen controller for ESC
+            try:
+                global current_recorder
+                current_recorder = Recorder(action_file_name, ev_stop_listen)
+                current_recorder.start()
+            except Exception:
+                pass
+            ListenController().start()
             can_start_listening = False
             can_start_executing = False
 
@@ -287,7 +256,6 @@ def command_adapter(action):
                 return
             else:
                 # use selected file (prefer actions/, fallback root)
-                global action_file_name
                 action_file_name = sel_path if os.path.exists(sel_path) else selected
             # init counters and flags
             try:
@@ -308,14 +276,14 @@ def command_adapter(action):
             startListenerBtn['state'] = 'disabled'
             startExecuteBtn['state'] = 'disabled'
             startExecuteBtn['text'] = 'Replaying, "ESC/F11" to stop.'
-            # threads
-            custom_thread_list = [
-                {'obj_thread': ExecuteController()},
-                {'obj_thread': MouseActionExecute()},
-                {'obj_thread': KeyboardActionExecute()}
-            ]
-            for t in custom_thread_list:
-                t['obj_thread'].start()
+            # start replayer (keyboard + mouse) and controller (ESC monitor)
+            try:
+                global current_replayer
+                current_replayer = Replayer(action_file_name, ev_stop_execute_keyboard, ev_stop_execute_mouse, ev_infinite_replay, execute_time_keyboard)
+                current_replayer.start()
+            except Exception:
+                pass
+            ExecuteController().start()
             can_start_listening = False
             can_start_executing = False
 
@@ -460,7 +428,7 @@ class KeyboardActionExecute(threading.Thread):
                 path = action_file_name if os.path.exists(action_file_name) else self.file_name
                 with open(path, 'r', encoding='utf-8') as file:
                     keyboard_exec = KeyBoardController()
-                    start_ts = time.time()
+                    start_ts = time.monotonic()
                     line = file.readline()
                     while line:
                         s = line.strip()
@@ -544,7 +512,7 @@ class MouseActionExecute(threading.Thread):
                     # playback-time screen size
                     cw, ch = get_screen_size()
                     rw, rh = cw, ch
-                    start_ts = time.time()
+                    start_ts = time.monotonic()
                     # pressed buttons tracking for cleanup
                     global pressed_mouse_buttons
                     line = file.readline()
