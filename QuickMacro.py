@@ -1,4 +1,5 @@
 import json
+import ctypes
 import threading
 import time
 import tkinter
@@ -6,6 +7,28 @@ import tkinter
 from pynput import keyboard, mouse
 from pynput.keyboard import Controller as KeyBoardController, KeyCode
 from pynput.mouse import Button, Controller as MouseController
+
+######################################################################
+# Helpers
+######################################################################
+def get_screen_size():
+    try:
+        user32 = ctypes.windll.user32
+        try:
+            user32.SetProcessDPIAware()
+        except Exception:
+            pass
+        return int(user32.GetSystemMetrics(0)), int(user32.GetSystemMetrics(1))
+    except Exception:
+        try:
+            # Fallback via tkinter if available
+            t = tkinter.Tk()
+            w = int(t.winfo_screenwidth())
+            h = int(t.winfo_screenheight())
+            t.destroy()
+            return w, h
+        except Exception:
+            return 1920, 1080
 
 ######################################################################
 # json template
@@ -40,6 +63,8 @@ def command_adapter(action):
     global can_start_executing
     global execute_time_keyboard
     global execute_time_mouse
+    global stop_execute_keyboard
+    global stop_execute_mouse
     
     # command list
     custom_thread_list = []
@@ -96,6 +121,9 @@ def command_adapter(action):
             count_down = executeCountDown.get()
             execute_time_keyboard = playCount.get()
             execute_time_mouse = playCount.get()
+            # initialize stop flags based on which workers are active
+            stop_execute_keyboard = not isReplayKeyboard.get()
+            stop_execute_mouse = not isReplayMouse.get()
 
         can_start_listening = False
         can_start_executing = False
@@ -126,6 +154,8 @@ class UIUpdateCutDownExecute(threading.Thread):
                 if custom_thread['obj_ui'] is not None:
                     if custom_thread['action'] == 'listen':
                         custom_thread['obj_ui']['text'] = str('Recording, "ESC" to stop.')
+                    elif custom_thread['action'] == 'execute':
+                        custom_thread['obj_ui']['text'] = str('Replaying, "ESC" to stop.')
                 if custom_thread['obj_thread'] is not None:
                     custom_thread['obj_thread'].start()
 
@@ -188,6 +218,9 @@ class MouseActionListener(threading.Thread):
 
     def run(self):
         with open(self.file_name, 'w', encoding='utf-8') as file:
+            # record-time screen size (DPI aware)
+            sw, sh = get_screen_size()
+            file.writelines(json.dumps({"name": "meta", "screen": {"w": sw, "h": sh}}) + "\n")
             # move mouse
             def on_move(x, y):
                 global stop_listen
@@ -195,8 +228,14 @@ class MouseActionListener(threading.Thread):
                     mouseListener.stop()
                 template = mouse_action_template()
                 template['event'] = 'move'
-                template['location']['x'] = x
-                template['location']['y'] = y
+                template['location']['x'] = int(x)
+                template['location']['y'] = int(y)
+                # normalized for DPI/resolution independence
+                try:
+                    template['location']['nx'] = float(x) / float(sw)
+                    template['location']['ny'] = float(y) / float(sh)
+                except Exception:
+                    pass
                 file.writelines(json.dumps(template) + "\n")
                 file.flush()
 
@@ -209,8 +248,13 @@ class MouseActionListener(threading.Thread):
                 template['event'] = 'click'
                 template['target'] = button.name
                 template['action'] = pressed
-                template['location']['x'] = x
-                template['location']['y'] = y
+                template['location']['x'] = int(x)
+                template['location']['y'] = int(y)
+                try:
+                    template['location']['nx'] = float(x) / float(sw)
+                    template['location']['ny'] = float(y) / float(sh)
+                except Exception:
+                    pass
                 file.writelines(json.dumps(template) + "\n")
                 file.flush()
 
@@ -240,20 +284,12 @@ class KeyboardActionExecute(threading.Thread):
         self.file_name = file_name
 
     def run(self):
-        global can_start_listening
-        global can_start_executing
         global execute_time_keyboard
         global stop_execute_keyboard
         while execute_time_keyboard >= 0:
             if stop_execute_keyboard:
-                can_start_listening = True
-                can_start_executing = True
-                startExecuteBtn['text'] = 'Start replaying'
-                startListenerBtn['state'] = 'normal'
-                startExecuteBtn['state'] = 'normal'
                 return
             
-            startExecuteBtn['text'] = str('Remaining %d #, "ESC" to stop.' %(execute_time_keyboard))
             with open(self.file_name, 'r', encoding='utf-8') as file:
                 keyboard_exec = KeyBoardController()
                 line = file.readline()
@@ -278,29 +314,57 @@ class MouseActionExecute(threading.Thread):
         self.file_name = file_name
 
     def run(self):
-        global can_start_listening
-        global can_start_executing
         global execute_time_mouse
         global stop_execute_mouse
         while execute_time_mouse >= 0:
             if stop_execute_mouse:
-                can_start_listening = True
-                can_start_executing = True
-                startExecuteBtn['text'] = 'Start replaying'
-                startListenerBtn['state'] = 'normal'
-                startExecuteBtn['state'] = 'normal'
                 return
             
             with open(self.file_name, 'r', encoding='utf-8') as file:
                 mouse_exec = MouseController()
+                # playback-time screen size
+                cw, ch = get_screen_size()
+                rw, rh = cw, ch
                 line = file.readline()
                 while line:
                     obj = json.loads(line)
-                    if obj['name'] == 'mouse':
+                    if obj.get('name') == 'meta':
+                        try:
+                            rw = int(obj['screen']['w'])
+                            rh = int(obj['screen']['h'])
+                        except Exception:
+                            rw, rh = cw, ch
+                    elif obj['name'] == 'mouse':
                         if obj['event'] == 'move':
-                            mouse_exec.position = (obj['location']['x'], obj['location']['y'])
+                            lx = obj['location'].get('x')
+                            ly = obj['location'].get('y')
+                            nx = obj['location'].get('nx')
+                            ny = obj['location'].get('ny')
+                            if nx is not None and ny is not None and rw and rh:
+                                tx = int(round(float(nx) * float(cw)))
+                                ty = int(round(float(ny) * float(ch)))
+                            else:
+                                tx = int(lx)
+                                ty = int(ly)
+                            mouse_exec.position = (tx, ty)
                             time.sleep(0.01)
                         elif obj['event'] == 'click':
+                            # ensure we click at recorded coordinates
+                            lx = obj['location'].get('x')
+                            ly = obj['location'].get('y')
+                            nx = obj['location'].get('nx')
+                            ny = obj['location'].get('ny')
+                            if nx is not None and ny is not None and rw and rh:
+                                tx = int(round(float(nx) * float(cw)))
+                                ty = int(round(float(ny) * float(ch)))
+                            else:
+                                tx = int(lx)
+                                ty = int(ly)
+                            try:
+                                mouse_exec.position = (tx, ty)
+                            except Exception:
+                                pass
+
                             if obj['action']:
                                 if obj['target'] == 'left':
                                     mouse_exec.press(Button.left)
@@ -358,26 +422,31 @@ class ExecuteController(threading.Thread):
     def run(self):
         global stop_execute_keyboard
         global stop_execute_mouse
-        stop_execute_keyboard = False
-        stop_execute_mouse = False
-        
+        global can_start_listening 
+        global can_start_executing
+
+        # Listener to allow ESC to stop replaying
         def on_release(key):
-            global can_start_listening 
-            global can_start_executing
             global stop_execute_keyboard
-            
+            global stop_execute_mouse
             if key == keyboard.Key.esc:
                 stop_execute_keyboard = True
                 stop_execute_mouse = True
-                can_start_listening = True
-                can_start_executing = True
-                startExecuteBtn['text'] = 'Start replaying'
-                startListenerBtn['state'] = 'normal'
-                startExecuteBtn['state'] = 'normal'
-                keyboardListener.stop()
 
-        with keyboard.Listener(on_release=on_release) as keyboardListener:
-            keyboardListener.join()            
+        keyboardListener = keyboard.Listener(on_release=on_release)
+        keyboardListener.start()
+
+        # Wait until all active workers have finished (or ESC pressed)
+        while not (stop_execute_keyboard and stop_execute_mouse):
+            time.sleep(0.05)
+
+        # Reset UI and states once everything is done
+        can_start_listening = True
+        can_start_executing = True
+        startExecuteBtn['text'] = 'Start replaying'
+        startListenerBtn['state'] = 'normal'
+        startExecuteBtn['state'] = 'normal'
+        keyboardListener.stop()
 
             
 ######################################################################
@@ -388,6 +457,10 @@ if __name__ == '__main__':
     can_start_listening = True
     can_start_executing = True
     execute_time_keyboard = 0
+    execute_time_mouse = 0
+    stop_execute_keyboard = True
+    stop_execute_mouse = True
+    stop_listen = False
     
     root = tkinter.Tk()
     root.title('Quick Macro - Sean Zou')

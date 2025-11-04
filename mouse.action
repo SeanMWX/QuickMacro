@@ -1,188 +1,114 @@
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1463, "y": 393}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1468, "y": 410}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1468, "y": 420}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1468, "y": 428}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1468, "y": 429}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1468, "y": 430}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1468, "y": 430}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1468, "y": 427}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1468, "y": 419}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1468, "y": 403}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1468, "y": 387}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1469, "y": 373}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1472, "y": 359}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1479, "y": 346}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1488, "y": 335}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1497, "y": 327}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1512, "y": 321}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1526, "y": 316}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1543, "y": 313}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1563, "y": 313}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1580, "y": 313}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1599, "y": 315}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1619, "y": 322}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1634, "y": 328}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1645, "y": 335}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1660, "y": 348}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1670, "y": 359}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1674, "y": 368}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1677, "y": 379}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1679, "y": 397}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1676, "y": 413}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1670, "y": 429}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1655, "y": 449}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1648, "y": 457}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1635, "y": 467}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1618, "y": 477}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1589, "y": 484}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1573, "y": 484}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1555, "y": 484}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1532, "y": 482}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1516, "y": 474}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1499, "y": 465}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1479, "y": 451}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1466, "y": 438}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1456, "y": 423}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1448, "y": 406}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1444, "y": 386}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1444, "y": 374}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1444, "y": 362}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1455, "y": 345}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1470, "y": 335}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1487, "y": 327}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1505, "y": 320}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1528, "y": 317}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1550, "y": 315}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1565, "y": 315}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1599, "y": 315}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1640, "y": 326}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1670, "y": 339}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1706, "y": 361}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1729, "y": 381}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1745, "y": 400}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1762, "y": 438}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1765, "y": 458}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1765, "y": 476}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1763, "y": 496}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1754, "y": 517}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1743, "y": 531}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1732, "y": 540}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1707, "y": 554}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1690, "y": 559}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1674, "y": 560}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1656, "y": 560}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1634, "y": 560}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1612, "y": 559}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1592, "y": 554}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1568, "y": 545}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1549, "y": 535}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1532, "y": 523}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1521, "y": 511}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1510, "y": 495}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1504, "y": 480}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1501, "y": 466}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1501, "y": 450}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1503, "y": 432}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1511, "y": 417}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1525, "y": 402}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1534, "y": 392}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1549, "y": 381}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1571, "y": 370}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1600, "y": 362}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1620, "y": 360}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1641, "y": 360}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1669, "y": 361}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1690, "y": 368}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1710, "y": 379}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1739, "y": 399}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1758, "y": 418}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1772, "y": 442}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1782, "y": 467}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1786, "y": 498}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1786, "y": 520}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1782, "y": 538}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1770, "y": 566}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1755, "y": 587}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1741, "y": 600}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1722, "y": 610}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1699, "y": 614}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1683, "y": 614}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1662, "y": 613}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1632, "y": 605}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1598, "y": 592}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1581, "y": 582}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1545, "y": 562}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1507, "y": 532}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1480, "y": 507}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1461, "y": 482}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1442, "y": 447}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1437, "y": 426}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1435, "y": 410}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1435, "y": 398}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1439, "y": 386}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1448, "y": 378}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1463, "y": 370}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1481, "y": 365}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1502, "y": 362}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1523, "y": 362}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1551, "y": 362}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1571, "y": 366}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1598, "y": 373}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1643, "y": 388}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1666, "y": 400}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1687, "y": 415}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1702, "y": 429}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1722, "y": 452}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1724, "y": 468}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1725, "y": 482}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1721, "y": 501}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1713, "y": 514}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1702, "y": 525}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1683, "y": 533}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1667, "y": 537}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1655, "y": 538}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1635, "y": 538}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1609, "y": 534}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1589, "y": 528}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1567, "y": 520}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1531, "y": 498}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1514, "y": 486}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1497, "y": 470}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1472, "y": 444}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1462, "y": 427}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1455, "y": 408}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1454, "y": 386}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1454, "y": 366}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1461, "y": 354}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1473, "y": 339}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1486, "y": 325}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1499, "y": 317}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1517, "y": 309}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1537, "y": 306}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1569, "y": 302}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1593, "y": 302}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1618, "y": 302}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1657, "y": 308}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1694, "y": 317}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1724, "y": 330}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1749, "y": 349}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1762, "y": 359}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1770, "y": 366}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1778, "y": 375}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1779, "y": 383}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1779, "y": 392}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1779, "y": 400}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1776, "y": 407}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1772, "y": 410}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1769, "y": 412}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1765, "y": 415}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1765, "y": 416}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1762, "y": 416}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1760, "y": 416}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1758, "y": 416}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1757, "y": 416}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1756, "y": 416}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1754, "y": 416}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1754, "y": 416}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1753, "y": 416}}
-{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1751, "y": 416}}
+{"name": "meta", "screen": {"w": 2560, "h": 1440}}
+{"name": "mouse", "event": "click", "target": "left", "action": true, "location": {"x": 673, "y": 317, "nx": 0.262890625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 673, "y": 317, "nx": 0.262890625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 675, "y": 317, "nx": 0.263671875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 675, "y": 317, "nx": 0.263671875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 677, "y": 317, "nx": 0.264453125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 678, "y": 317, "nx": 0.26484375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 680, "y": 317, "nx": 0.265625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 682, "y": 317, "nx": 0.26640625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 685, "y": 317, "nx": 0.267578125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 688, "y": 317, "nx": 0.26875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 692, "y": 317, "nx": 0.2703125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 694, "y": 317, "nx": 0.27109375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 697, "y": 317, "nx": 0.272265625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 701, "y": 317, "nx": 0.273828125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 705, "y": 317, "nx": 0.275390625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 708, "y": 317, "nx": 0.2765625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 711, "y": 317, "nx": 0.277734375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 714, "y": 317, "nx": 0.27890625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 716, "y": 317, "nx": 0.2796875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 718, "y": 317, "nx": 0.28046875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 719, "y": 317, "nx": 0.280859375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 720, "y": 317, "nx": 0.28125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 722, "y": 317, "nx": 0.28203125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 724, "y": 317, "nx": 0.2828125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 727, "y": 317, "nx": 0.283984375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 730, "y": 317, "nx": 0.28515625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 732, "y": 317, "nx": 0.2859375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 735, "y": 317, "nx": 0.287109375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 738, "y": 317, "nx": 0.28828125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 739, "y": 317, "nx": 0.288671875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 742, "y": 317, "nx": 0.28984375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 744, "y": 317, "nx": 0.290625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 745, "y": 317, "nx": 0.291015625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 746, "y": 317, "nx": 0.29140625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 747, "y": 317, "nx": 0.291796875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 747, "y": 317, "nx": 0.291796875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 748, "y": 317, "nx": 0.2921875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 749, "y": 317, "nx": 0.292578125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 750, "y": 317, "nx": 0.29296875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 752, "y": 317, "nx": 0.29375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 753, "y": 317, "nx": 0.294140625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 754, "y": 317, "nx": 0.29453125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 756, "y": 317, "nx": 0.2953125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 757, "y": 317, "nx": 0.295703125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 759, "y": 317, "nx": 0.296484375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 760, "y": 317, "nx": 0.296875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 761, "y": 317, "nx": 0.297265625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 762, "y": 317, "nx": 0.29765625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 763, "y": 317, "nx": 0.298046875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 763, "y": 317, "nx": 0.298046875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 764, "y": 317, "nx": 0.2984375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 765, "y": 317, "nx": 0.298828125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 765, "y": 317, "nx": 0.298828125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 766, "y": 317, "nx": 0.29921875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 768, "y": 317, "nx": 0.3, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 768, "y": 317, "nx": 0.3, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 770, "y": 317, "nx": 0.30078125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 771, "y": 317, "nx": 0.301171875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 773, "y": 317, "nx": 0.301953125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 775, "y": 317, "nx": 0.302734375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 775, "y": 317, "nx": 0.302734375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 776, "y": 317, "nx": 0.303125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 777, "y": 317, "nx": 0.303515625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 777, "y": 317, "nx": 0.303515625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 778, "y": 317, "nx": 0.30390625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 779, "y": 317, "nx": 0.304296875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 780, "y": 317, "nx": 0.3046875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 780, "y": 317, "nx": 0.3046875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 781, "y": 317, "nx": 0.305078125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 782, "y": 317, "nx": 0.30546875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 782, "y": 317, "nx": 0.30546875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 783, "y": 317, "nx": 0.305859375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 784, "y": 317, "nx": 0.30625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 785, "y": 317, "nx": 0.306640625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 785, "y": 317, "nx": 0.306640625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 786, "y": 317, "nx": 0.30703125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 787, "y": 317, "nx": 0.307421875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 787, "y": 317, "nx": 0.307421875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 788, "y": 317, "nx": 0.3078125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 789, "y": 317, "nx": 0.308203125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 790, "y": 317, "nx": 0.30859375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 790, "y": 317, "nx": 0.30859375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 791, "y": 317, "nx": 0.308984375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 792, "y": 317, "nx": 0.309375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 793, "y": 317, "nx": 0.309765625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 794, "y": 317, "nx": 0.31015625, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 795, "y": 317, "nx": 0.310546875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 795, "y": 317, "nx": 0.310546875, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 796, "y": 317, "nx": 0.3109375, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 797, "y": 317, "nx": 0.311328125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "click", "target": "left", "action": false, "location": {"x": 797, "y": 317, "nx": 0.311328125, "ny": 0.22013888888888888}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 799, "y": 318, "nx": 0.312109375, "ny": 0.22083333333333333}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 803, "y": 320, "nx": 0.313671875, "ny": 0.2222222222222222}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 811, "y": 324, "nx": 0.316796875, "ny": 0.225}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 821, "y": 329, "nx": 0.320703125, "ny": 0.22847222222222222}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 835, "y": 335, "nx": 0.326171875, "ny": 0.2326388888888889}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 855, "y": 343, "nx": 0.333984375, "ny": 0.23819444444444443}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 877, "y": 351, "nx": 0.342578125, "ny": 0.24375}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 901, "y": 360, "nx": 0.351953125, "ny": 0.25}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 930, "y": 371, "nx": 0.36328125, "ny": 0.25763888888888886}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 958, "y": 382, "nx": 0.37421875, "ny": 0.2652777777777778}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 983, "y": 393, "nx": 0.383984375, "ny": 0.27291666666666664}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1005, "y": 402, "nx": 0.392578125, "ny": 0.2791666666666667}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1023, "y": 409, "nx": 0.399609375, "ny": 0.28402777777777777}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1039, "y": 415, "nx": 0.405859375, "ny": 0.2881944444444444}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1051, "y": 420, "nx": 0.410546875, "ny": 0.2916666666666667}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1058, "y": 424, "nx": 0.41328125, "ny": 0.29444444444444445}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1062, "y": 426, "nx": 0.41484375, "ny": 0.29583333333333334}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1065, "y": 427, "nx": 0.416015625, "ny": 0.2965277777777778}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1066, "y": 428, "nx": 0.41640625, "ny": 0.2972222222222222}}
+{"name": "mouse", "event": "click", "target": "left", "action": true, "location": {"x": 1066, "y": 428, "nx": 0.41640625, "ny": 0.2972222222222222}}
+{"name": "mouse", "event": "click", "target": "left", "action": false, "location": {"x": 1066, "y": 428, "nx": 0.41640625, "ny": 0.2972222222222222}}
+{"name": "mouse", "event": "move", "target": "default", "action": "default", "location": {"x": 1066, "y": 428, "nx": 0.41640625, "ny": 0.2972222222222222}}
