@@ -14,6 +14,7 @@ import tkinter.messagebox as messagebox
 from pynput import keyboard, mouse
 from pynput.keyboard import Controller as KeyBoardController, KeyCode, Key
 from pynput.mouse import Button, Controller as MouseController
+from core.actions import parse_action_line as action_parse_line, compose_action_line as action_compose_line, extract_meta as action_extract_meta
 
 ######################################################################
 # Helpers
@@ -127,22 +128,6 @@ def select_current_action_in_dropdown():
                 actionFileVar.set(files2[-1])
     except Exception:
         pass
-    try:
-        ms = MouseController()
-        if 'left' in pressed_mouse_buttons:
-            try:
-                ms.release(Button.left)
-            except Exception:
-                pass
-            pressed_mouse_buttons.discard('left')
-        if 'right' in pressed_mouse_buttons:
-            try:
-                ms.release(Button.right)
-            except Exception:
-                pass
-            pressed_mouse_buttons.discard('right')
-    except Exception:
-        pass
 
 ######################################################################
 # json template
@@ -177,8 +162,6 @@ def command_adapter(action):
     global can_start_executing
     global execute_time_keyboard
     global execute_time_mouse
-    global stop_execute_keyboard
-    global stop_execute_mouse
     
     # command list
     custom_thread_list = []
@@ -190,6 +173,11 @@ def command_adapter(action):
             init_new_action_file()
             # update UI selection to the new file
             select_current_action_in_dropdown()
+            # reset listen stop event
+            try:
+                ev_stop_listen.clear()
+            except Exception:
+                pass
             # UI updates
             startListenerBtn['state'] = 'disabled'
             startExecuteBtn['state'] = 'disabled'
@@ -218,12 +206,20 @@ def command_adapter(action):
                 global action_file_name
                 action_file_name = sel_path if os.path.exists(sel_path) else selected
             # init counters and flags
-            global infinite_replay
-            infinite_replay = bool(infiniteRepeatVar.get()) if 'infiniteRepeatVar' in globals() else False
+            try:
+                if 'infiniteRepeatVar' in globals() and bool(infiniteRepeatVar.get()):
+                    ev_infinite_replay.set()
+                else:
+                    ev_infinite_replay.clear()
+            except Exception:
+                pass
             execute_time_keyboard = playCount.get()
             execute_time_mouse = playCount.get()
-            stop_execute_keyboard = False
-            stop_execute_mouse = False
+            try:
+                ev_stop_execute_keyboard.clear()
+                ev_stop_execute_mouse.clear()
+            except Exception:
+                pass
             # UI updates
             startListenerBtn['state'] = 'disabled'
             startExecuteBtn['state'] = 'disabled'
@@ -274,16 +270,19 @@ class KeyboardActionListener(threading.Thread):
         def on_release(key):
             global can_start_listening
             global can_start_executing
-            global stop_listen
+            global ev_stop_listen
             global record_start_time
 
             if key == keyboard.Key.esc:
                 # Stop by pressing "ESC"
-                stop_listen = True
+                try:
+                    ev_stop_listen.set()
+                except Exception:
+                    pass
                 keyboardListener.stop()
                 return False
 
-            if not stop_listen:
+            if not ev_stop_listen.is_set():
                 # ignore control hotkeys in recording
                 if key in (keyboard.Key.f10, keyboard.Key.f11):
                     return
@@ -310,8 +309,8 @@ class MouseActionListener(threading.Thread):
         sw, sh = get_screen_size()
         # move mouse
         def on_move(x, y):
-            global stop_listen, record_start_time
-            if stop_listen:
+            global ev_stop_listen, record_start_time
+            if ev_stop_listen.is_set():
                 mouseListener.stop()
             t = int((time.time() - record_start_time) * 1000)
             try:
@@ -327,8 +326,8 @@ class MouseActionListener(threading.Thread):
 
         # click mouse
         def on_click(x, y, button, pressed):
-            global stop_listen, record_start_time
-            if stop_listen:
+            global ev_stop_listen, record_start_time
+            if ev_stop_listen.is_set():
                 mouseListener.stop()
             t = int((time.time() - record_start_time) * 1000)
             btn = 'left' if button == Button.left else 'right'
@@ -346,8 +345,8 @@ class MouseActionListener(threading.Thread):
 
         # scroll mouse
         def on_scroll(x, y, x_axis, y_axis):
-            global stop_listen, record_start_time
-            if stop_listen:
+            global ev_stop_listen, record_start_time
+            if ev_stop_listen.is_set():
                 mouseListener.stop()
             t = int((time.time() - record_start_time) * 1000)
             write_action_line(f"M SCROLL {int(x_axis)} {int(y_axis)} {t}")
@@ -368,10 +367,10 @@ class KeyboardActionExecute(threading.Thread):
 
     def run(self):
         global execute_time_keyboard
-        global stop_execute_keyboard
+        global ev_stop_execute_keyboard
         global pressed_vks
         while True:
-            if stop_execute_keyboard:
+            if ev_stop_execute_keyboard.is_set():
                 return
             try:
                 path = action_file_name if os.path.exists(action_file_name) else self.file_name
@@ -381,31 +380,30 @@ class KeyboardActionExecute(threading.Thread):
                     line = file.readline()
                     while line:
                         s = line.strip()
-                        if not s or s.startswith('#'):
+                        if not s:
                             line = file.readline(); continue
-                        parts = s.split()
-                        if parts[0] == 'K' and len(parts) >= 4:
-                            kind = parts[1]
+                        d = action_parse_line(s)
+                        if d.get('type') == 'VK':
                             try:
-                                vk = int(parts[2])
-                                t_ms = int(parts[-1])
+                                t_ms = int(d.get('ms') or 0)
                             except Exception:
-                                line = file.readline(); continue
+                                t_ms = 0
                             target = start_ts + (t_ms/1000.0)
                             delay = target - time.time()
                             if delay > 0:
                                 time.sleep(delay)
                             try:
-                                if kind == 'DOWN':
+                                vk = int(d.get('vk') or 0)
+                                if d.get('op') == 'DOWN':
                                     keyboard_exec.press(KeyCode.from_vk(vk))
                                     pressed_vks.add(vk)
-                                elif kind == 'UP':
+                                elif d.get('op') == 'UP':
                                     keyboard_exec.release(KeyCode.from_vk(vk))
                                     pressed_vks.discard(vk)
                             except Exception:
                                 pass
-                        # legacy json support
                         else:
+                            # legacy json support
                             try:
                                 obj = json.loads(line)
                                 if obj.get('name') == 'keyboard':
@@ -433,11 +431,14 @@ class KeyboardActionExecute(threading.Thread):
                         pressed_vks.discard(vk)
                 except Exception:
                     pass
-            if 'infinite_replay' in globals() and infinite_replay:
+            if 'ev_infinite_replay' in globals() and ev_infinite_replay.is_set():
                 continue
             execute_time_keyboard = execute_time_keyboard - 1
             if execute_time_keyboard <= 0:
-                stop_execute_keyboard = True
+                try:
+                    ev_stop_execute_keyboard.set()
+                except Exception:
+                    pass
                 return
 
 class MouseActionExecute(threading.Thread):
@@ -449,9 +450,9 @@ class MouseActionExecute(threading.Thread):
 
     def run(self):
         global execute_time_mouse
-        global stop_execute_mouse
+        global ev_stop_execute_mouse
         while True:
-            if stop_execute_mouse:
+            if ev_stop_execute_mouse.is_set():
                 return
             try:
                 path = action_file_name if os.path.exists(action_file_name) else self.file_name
@@ -466,94 +467,73 @@ class MouseActionExecute(threading.Thread):
                     line = file.readline()
                     while line:
                         s = line.strip()
-                        if not s or s.startswith('#'):
+                        if not s:
                             line = file.readline(); continue
-                        parts = s.split()
-                        if parts[0] == 'META' and len(parts) >= 4 and parts[1] == 'SCREEN':
+                        d = action_parse_line(s)
+                        if d.get('type') == 'META' and d.get('op') == 'SCREEN':
                             try:
-                                rw = int(parts[2]); rh = int(parts[3])
+                                rw = int(d.get('x') or cw); rh = int(d.get('y') or ch)
                             except Exception:
                                 rw, rh = cw, ch
-                        elif parts[0] == 'M' and len(parts) >= 3:
-                            if parts[1] == 'MOVE':
-                                # formats: M MOVE x y t  OR  M MOVE x y nx ny t
+                        elif d.get('type') == 'MS':
+                            # compute target time
+                            try:
+                                t_ms = int(d.get('ms') or 0)
+                            except Exception:
+                                t_ms = 0
+                            target = start_ts + (t_ms/1000.0)
+                            delay = target - time.time()
+                            if delay > 0:
+                                time.sleep(delay)
+                            if d.get('op') == 'MOVE':
                                 try:
-                                    if len(parts) >= 6:
-                                        # with norm
-                                        x = int(parts[2]); y = int(parts[3]); nx = float(parts[4]); ny = float(parts[5]); t_ms = int(parts[-1])
-                                    else:
-                                        x = int(parts[2]); y = int(parts[3]); nx = ny = None; t_ms = int(parts[-1])
+                                    x = int(d.get('x') or 0); y = int(d.get('y') or 0)
                                 except Exception:
-                                    line = file.readline(); continue
+                                    x = y = 0
+                                nx = d.get('nx'); ny = d.get('ny')
                                 use_norm = False
                                 try:
-                                    if rw and rh and (abs(cw - rw) / float(rw) > 0.02 or abs(ch - rh) / float(rh) > 0.02):
-                                        use_norm = (nx is not None and ny is not None)
+                                    if rw and rh and (abs(cw - rw)/float(rw) > 0.02 or abs(ch - rh)/float(rh) > 0.02):
+                                        use_norm = (nx not in (None,'') and ny not in (None,''))
                                 except Exception:
                                     use_norm = False
-                                if use_norm:
-                                    tx = int(round(nx * float(cw)))
-                                    ty = int(round(ny * float(ch)))
-                                else:
-                                    tx = x; ty = y
-                                target = start_ts + (t_ms/1000.0)
-                                delay = target - time.time()
-                                if delay > 0:
-                                    time.sleep(delay)
+                                tx = int(round(float(nx) * float(cw))) if use_norm else x
+                                ty = int(round(float(ny) * float(ch))) if use_norm else y
                                 mouse_exec.position = (tx, ty)
-                            elif parts[1] == 'CLICK':
-                                # formats: M CLICK btn DOWN/UP x y [nx ny] t
+                            elif d.get('op') == 'CLICK':
+                                btn = d.get('btn') or 'left'; act = d.get('act') or 'DOWN'
                                 try:
-                                    btn = parts[2]; act = parts[3]
-                                    x = int(parts[4]); y = int(parts[5])
-                                    if len(parts) >= 9:
-                                        nx = float(parts[6]); ny = float(parts[7]); t_ms = int(parts[-1])
-                                    else:
-                                        nx = ny = None; t_ms = int(parts[-1])
+                                    x = int(d.get('x') or 0); y = int(d.get('y') or 0)
                                 except Exception:
-                                    line = file.readline(); continue
+                                    x = y = 0
+                                nx = d.get('nx'); ny = d.get('ny')
                                 use_norm = False
                                 try:
-                                    if rw and rh and (abs(cw - rw) / float(rw) > 0.02 or abs(ch - rh) / float(rh) > 0.02):
-                                        use_norm = (nx is not None and ny is not None)
+                                    if rw and rh and (abs(cw - rw)/float(rw) > 0.02 or abs(ch - rh)/float(rh) > 0.02):
+                                        use_norm = (nx not in (None,'') and ny not in (None,''))
                                 except Exception:
                                     use_norm = False
-                                if use_norm:
-                                    tx = int(round(nx * float(cw)))
-                                    ty = int(round(ny * float(ch)))
-                                else:
-                                    tx = x; ty = y
-                                target = start_ts + (t_ms/1000.0)
-                                delay = target - time.time()
-                                if delay > 0:
-                                    time.sleep(delay)
+                                tx = int(round(float(nx) * float(cw))) if use_norm else x
+                                ty = int(round(float(ny) * float(ch))) if use_norm else y
                                 try:
                                     mouse_exec.position = (tx, ty)
                                 except Exception:
                                     pass
                                 if act == 'DOWN':
                                     if btn == 'left':
-                                        mouse_exec.press(Button.left)
-                                        pressed_mouse_buttons.add('left')
+                                        mouse_exec.press(Button.left); pressed_mouse_buttons.add('left')
                                     else:
-                                        mouse_exec.press(Button.right)
-                                        pressed_mouse_buttons.add('right')
+                                        mouse_exec.press(Button.right); pressed_mouse_buttons.add('right')
                                 else:
                                     if btn == 'left':
-                                        mouse_exec.release(Button.left)
-                                        pressed_mouse_buttons.discard('left')
+                                        mouse_exec.release(Button.left); pressed_mouse_buttons.discard('left')
                                     else:
-                                        mouse_exec.release(Button.right)
-                                        pressed_mouse_buttons.discard('right')
-                            elif parts[1] == 'SCROLL':
+                                        mouse_exec.release(Button.right); pressed_mouse_buttons.discard('right')
+                            elif d.get('op') == 'SCROLL':
                                 try:
-                                    dx = int(parts[2]); dy = int(parts[3]); t_ms = int(parts[-1])
+                                    dx = int(d.get('dx') or 0); dy = int(d.get('dy') or 0)
                                 except Exception:
-                                    line = file.readline(); continue
-                                target = start_ts + (t_ms/1000.0)
-                                delay = target - time.time()
-                                if delay > 0:
-                                    time.sleep(delay)
+                                    dx = dy = 0
                                 mouse_exec.scroll(dx, dy)
                         else:
                             # legacy json support
@@ -562,7 +542,6 @@ class MouseActionExecute(threading.Thread):
                                 if obj.get('name') == 'meta':
                                     rw = int(obj['screen']['w']); rh = int(obj['screen']['h'])
                                 elif obj.get('name') == 'mouse':
-                                    # legacy path retained (no timing)
                                     if obj['event'] == 'move':
                                         mouse_exec.position = (int(obj['location']['x']), int(obj['location']['y']))
                                         time.sleep(0.005)
@@ -590,11 +569,14 @@ class MouseActionExecute(threading.Thread):
                         pressed_mouse_buttons.discard('right')
                 except Exception:
                     pass
-            if 'infinite_replay' in globals() and infinite_replay:
+            if 'ev_infinite_replay' in globals() and ev_infinite_replay.is_set():
                 continue
             execute_time_mouse = execute_time_mouse - 1
             if execute_time_mouse <= 0:
-                stop_execute_mouse = True
+                try:
+                    ev_stop_execute_mouse.set()
+                except Exception:
+                    pass
                 return
                 
                 
@@ -608,16 +590,22 @@ class ListenController(threading.Thread):
         self.daemon = True
 
     def run(self):
-        global stop_listen
-        stop_listen = False
+        global ev_stop_listen
+        try:
+            ev_stop_listen.clear()
+        except Exception:
+            pass
         
         def on_release(key):
             global can_start_listening 
             global can_start_executing
-            global stop_listen
+            global ev_stop_listen
             
             if key == keyboard.Key.esc:
-                stop_listen = True
+                try:
+                    ev_stop_listen.set()
+                except Exception:
+                    pass
                 can_start_listening = True
                 can_start_executing = True
                 startListenerBtn['text'] = 'Start recording (F10)'
@@ -635,24 +623,27 @@ class ExecuteController(threading.Thread):
         self.daemon = True
 
     def run(self):
-        global stop_execute_keyboard
-        global stop_execute_mouse
+        global ev_stop_execute_keyboard
+        global ev_stop_execute_mouse
         global can_start_listening 
         global can_start_executing
 
         # Listener to allow ESC to stop replaying
         def on_release(key):
-            global stop_execute_keyboard
-            global stop_execute_mouse
+            global ev_stop_execute_keyboard
+            global ev_stop_execute_mouse
             if key == keyboard.Key.esc:
-                stop_execute_keyboard = True
-                stop_execute_mouse = True
+                try:
+                    ev_stop_execute_keyboard.set()
+                    ev_stop_execute_mouse.set()
+                except Exception:
+                    pass
 
         keyboardListener = keyboard.Listener(on_release=on_release)
         keyboardListener.start()
 
         # Wait until all active workers have finished (or ESC pressed)
-        while not (stop_execute_keyboard and stop_execute_mouse):
+        while not (ev_stop_execute_keyboard.is_set() and ev_stop_execute_mouse.is_set()):
             time.sleep(0.05)
 
         # Safety: release any stuck inputs
@@ -696,7 +687,7 @@ class HotkeyController(threading.Thread):
 
         def toggle_replay():
             global can_start_listening, can_start_executing
-            global stop_execute_keyboard, stop_execute_mouse
+            global ev_stop_execute_keyboard, ev_stop_execute_mouse
             global root
             # if idle, start replay; else request stop
             if can_start_listening and can_start_executing:
@@ -706,8 +697,11 @@ class HotkeyController(threading.Thread):
                 except Exception:
                     command_adapter('execute')
             else:
-                stop_execute_keyboard = True
-                stop_execute_mouse = True
+                try:
+                    ev_stop_execute_keyboard.set()
+                    ev_stop_execute_mouse.set()
+                except Exception:
+                    pass
         
         last_f10 = 0.0
         last_f11 = 0.0
@@ -742,12 +736,13 @@ if __name__ == '__main__':
     can_start_executing = True
     execute_time_keyboard = 0
     execute_time_mouse = 0
-    stop_execute_keyboard = True
-    stop_execute_mouse = True
-    stop_listen = False
+    # threading Events for coordination
+    ev_stop_execute_keyboard = threading.Event(); ev_stop_execute_keyboard.set()
+    ev_stop_execute_mouse = threading.Event(); ev_stop_execute_mouse.set()
+    ev_stop_listen = threading.Event(); ev_stop_listen.set()
+    ev_infinite_replay = threading.Event(); ev_infinite_replay.clear()
     pressed_vks = set()
     pressed_mouse_buttons = set()
-    infinite_replay = False
     
     root = tkinter.Tk()
 
@@ -943,73 +938,11 @@ if __name__ == '__main__':
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
 
+        # use shared parser/serializer
         def parse_action_line(s):
-            s = s.strip('\n')
-            if not s:
-                return {'type':'','op':'','vk':'','btn':'','act':'','x':'','y':'','nx':'','ny':'','dx':'','dy':'','ms':'','raw':s}
-            if s.startswith('#'):
-                return {'type':'#','op':'','vk':'','btn':'','act':'','x':'','y':'','nx':'','ny':'','dx':'','dy':'','ms':'','raw':s}
-            parts = s.split()
-            try:
-                if parts[0] == 'META':
-                    return {'type':'META','op':parts[1] if len(parts)>1 else '', 'vk':'','btn':'','act':'','x':(parts[2] if len(parts)>2 else ''), 'y':(parts[3] if len(parts)>3 else ''), 'nx':'','ny':'','dx':'','dy':'','ms':'','raw':s}
-                if parts[0] == 'K':
-                    return {'type':'VK','op':parts[1], 'vk':(parts[2] if len(parts)>2 else ''), 'btn':'','act':'','x':'','y':'','nx':'','ny':'','dx':'','dy':'','ms':(parts[-1] if len(parts)>3 else ''), 'raw':s}
-                if parts[0] == 'M':
-                    if parts[1] == 'MOVE':
-                        if len(parts) >= 7:
-                            # M MOVE x y nx ny ms
-                            return {'type':'MS','op':'MOVE','vk':'','btn':'','act':'','x':parts[2],'y':parts[3],'nx':parts[4],'ny':parts[5],'dx':'','dy':'','ms':parts[6],'raw':s}
-                        else:
-                            # M MOVE x y ms
-                            return {'type':'MS','op':'MOVE','vk':'','btn':'','act':'','x':parts[2],'y':parts[3],'nx':'','ny':'','dx':'','dy':'','ms':parts[4] if len(parts)>4 else '','raw':s}
-                    if parts[1] == 'CLICK':
-                        # M CLICK btn act x y [nx ny] ms
-                        btn = parts[2] if len(parts)>2 else ''
-                        act = parts[3] if len(parts)>3 else ''
-                        if len(parts) >= 10:
-                            return {'type':'MS','op':'CLICK','vk':'','btn':btn,'act':act,'x':parts[4],'y':parts[5],'nx':parts[6],'ny':parts[7],'dx':'','dy':'','ms':parts[8] if len(parts)>8 else '','raw':s}
-                        else:
-                            return {'type':'MS','op':'CLICK','vk':'','btn':btn,'act':act,'x':parts[4] if len(parts)>4 else '','y':parts[5] if len(parts)>5 else '','nx':'','ny':'','dx':'','dy':'','ms':parts[-1] if len(parts)>6 else '','raw':s}
-                    if parts[1] == 'SCROLL':
-                        return {'type':'MS','op':'SCROLL','vk':'','btn':'','act':'','x':'','y':'','nx':'','ny':'','dx':parts[2] if len(parts)>2 else '','dy':parts[3] if len(parts)>3 else '','ms':parts[4] if len(parts)>4 else '','raw':s}
-            except Exception:
-                pass
-            # Fallback
-            return {'type':'','op':'','vk':'','btn':'','act':'','x':'','y':'','nx':'','ny':'','dx':'','dy':'','ms':'','raw':s}
-
+            return action_parse_line(s)
         def compose_action_line(d):
-            t = (d.get('type') or '').strip()
-            op = (d.get('op') or '').strip()
-            if t == '#':
-                return d.get('raw','')
-            if t == 'META':
-                if op.upper() == 'SCREEN':
-                    return f"META SCREEN {d.get('x','')} {d.get('y','')}".strip()
-                elif op.upper() == 'START':
-                    return f"META START {d.get('x','')}".strip()
-                return d.get('raw','')
-            if t == 'VK':
-                vk = d.get('vk','')
-                ms = d.get('ms','')
-                return f"K {op} {vk} {ms}".strip()
-            if t == 'MS':
-                if op.upper() == 'MOVE':
-                    x,y,nx,ny,ms = d.get('x',''),d.get('y',''),d.get('nx',''),d.get('ny',''),d.get('ms','')
-                    if nx and ny:
-                        return f"M MOVE {x} {y} {nx} {ny} {ms}".strip()
-                    return f"M MOVE {x} {y} {ms}".strip()
-                if op.upper() == 'CLICK':
-                    btn = d.get('btn',''); act = d.get('act',''); x,y,nx,ny,ms = d.get('x',''),d.get('y',''),d.get('nx',''),d.get('ny',''),d.get('ms','')
-                    if nx and ny:
-                        return f"M CLICK {btn} {act} {x} {y} {nx} {ny} {ms}".strip()
-                    return f"M CLICK {btn} {act} {x} {y} {ms}".strip()
-                if op.upper() == 'SCROLL':
-                    dx,dy,ms = d.get('dx',''),d.get('dy',''),d.get('ms','')
-                    return f"M SCROLL {dx} {dy} {ms}".strip()
-            # Fallback
-            raw = d.get('raw','')
-            return raw if raw else ' '
+            return action_compose_line(d)
 
         def allowed_columns_for(row_type, row_op):
             if row_type == 'VK':
@@ -1252,6 +1185,9 @@ if __name__ == '__main__':
         dragging_selection = []
         drag_insert_index = None
         insert_line = tkinter.Frame(frame, height=2, background='#ff4d4f')
+        # auto-scroll state while dragging near edges
+        last_drag_y = None
+        drag_scroll_job = None
         # highlight tag for dragging block
         try:
             tree.tag_configure('drag_sel', background='#e6f7ff')
@@ -1329,7 +1265,7 @@ if __name__ == '__main__':
                 return len(children), last_bbox[1] + last_bbox[3]
 
         def on_tree_motion(event):
-            nonlocal drag_insert_index, dragging_selection
+            nonlocal drag_insert_index, dragging_selection, last_drag_y, drag_scroll_job
             if not dragging_selection:
                 # initialize dragging block from current selection (or pressed row)
                 sel_now = list(tree.selection())
@@ -1344,6 +1280,37 @@ if __name__ == '__main__':
                     tree.selection_set(tuple(dragging_selection))
                 except Exception:
                     pass
+            # record last cursor y and (re)schedule autoscroll
+            last_drag_y = event.y
+            def autoscroll_tick():
+                nonlocal drag_scroll_job, last_drag_y, drag_insert_index
+                drag_scroll_job = None
+                if not dragging_selection:
+                    return
+                try:
+                    zone = 24
+                    h = tree.winfo_height()
+                    if last_drag_y is None:
+                        return
+                    if last_drag_y < zone:
+                        tree.yview_scroll(-1, 'units')
+                    elif last_drag_y > (h - zone):
+                        tree.yview_scroll(1, 'units')
+                    # after scrolling, update insert indicator at current cursor y
+                    fake_event = type('E', (), {'y': last_drag_y})()
+                    insert_at, line_y = compute_insert_at(fake_event)
+                    drag_insert_index = insert_at
+                    try:
+                        insert_line.place(in_=tree, x=0, y=line_y, width=tree.winfo_width(), height=2)
+                    except Exception:
+                        pass
+                finally:
+                    # keep ticking while dragging
+                    if dragging_selection:
+                        drag_scroll_job = editor.after(50, autoscroll_tick)
+            # schedule ticker if not already scheduled
+            if drag_scroll_job is None:
+                drag_scroll_job = editor.after(50, autoscroll_tick)
             insert_at, line_y = compute_insert_at(event)
             drag_insert_index = insert_at
             try:
@@ -1352,11 +1319,19 @@ if __name__ == '__main__':
                 pass
 
         def on_tree_release(event):
-            nonlocal dragging_selection, drag_insert_index
+            nonlocal dragging_selection, drag_insert_index, drag_scroll_job, last_drag_y
             try:
                 insert_line.place_forget()
             except Exception:
                 pass
+            # cancel autoscroll ticker
+            try:
+                if drag_scroll_job is not None:
+                    editor.after_cancel(drag_scroll_job)
+            except Exception:
+                pass
+            drag_scroll_job = None
+            last_drag_y = None
             if not dragging_selection or drag_insert_index is None:
                 dragging_selection = []
                 drag_insert_index = None
@@ -1501,10 +1476,13 @@ if __name__ == '__main__':
 
     # Ensure closing window terminates app
     def on_close():
-        global stop_execute_keyboard, stop_execute_mouse, stop_listen
-        stop_execute_keyboard = True
-        stop_execute_mouse = True
-        stop_listen = True
+        global ev_stop_execute_keyboard, ev_stop_execute_mouse, ev_stop_listen
+        try:
+            ev_stop_execute_keyboard.set()
+            ev_stop_execute_mouse.set()
+            ev_stop_listen.set()
+        except Exception:
+            pass
         release_all_inputs()
         try:
             root.destroy()
