@@ -3,9 +3,12 @@ import ctypes
 import os
 import glob
 from datetime import datetime
+from pathlib import Path
 import threading
 import time
 import tkinter
+from tkinter import ttk
+import tkinter.font as tkfont
 
 from pynput import keyboard, mouse
 from pynput.keyboard import Controller as KeyBoardController, KeyCode, Key
@@ -49,15 +52,25 @@ def release_all_inputs():
     except Exception:
         pass
 
+def ensure_actions_dir():
+    p = Path('actions')
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
 def list_action_files():
-    files = sorted(glob.glob('*.action'))
-    return files
+    # Prefer files under actions/; if none, fall back to root
+    actions_dir = ensure_actions_dir()
+    files = sorted(str(f.name) for f in actions_dir.glob('*.action'))
+    if files:
+        return files
+    return sorted(glob.glob('*.action'))
 
 def init_new_action_file():
     # Create a new action file with timestamp-based name and header/meta
     global action_file_name, record_start_time
     ts = datetime.now().strftime('%Y%m%d-%H%M%S')
-    action_file_name = f"{ts}.action"
+    actions_dir = ensure_actions_dir()
+    action_file_name = str(actions_dir / f"{ts}.action")
     sw, sh = get_screen_size()
     record_start_time = time.time()
     try:
@@ -76,6 +89,41 @@ def write_action_line(line):
         with record_write_lock:
             with open(action_file_name, 'a', encoding='utf-8') as f:
                 f.write(line + "\n")
+    except Exception:
+        pass
+
+def ensure_assets_dir():
+    p = Path('assets')
+    try:
+        if not p.exists():
+            p.mkdir(parents=True, exist_ok=True)
+        readme = p / 'README.txt'
+        if not readme.exists():
+            readme.write_text(
+                'Place optional UI images here:\n'
+                '- bg.png   : window background (PNG)\n'
+                '- icon.png : window icon (PNG)\n'
+                'Replace these with your own cute/moe assets.\n',
+                encoding='utf-8'
+            )
+    except Exception:
+        pass
+
+# Sync the Combobox to point at the current recording file
+def select_current_action_in_dropdown():
+    try:
+        if 'actionFileVar' in globals():
+            name = os.path.basename(action_file_name) if 'action_file_name' in globals() else ''
+            files2 = list_action_files()
+            # ensure list contains the current file name
+            if name and name not in files2:
+                files2.append(name)
+            if 'actionFileSelect' in globals():
+                actionFileSelect['values'] = files2
+            if name:
+                actionFileVar.set(name)
+            elif files2:
+                actionFileVar.set(files2[-1])
     except Exception:
         pass
     try:
@@ -135,10 +183,12 @@ def command_adapter(action):
     custom_thread_list = []
     print(can_start_listening)
     
-    if can_start_listening or can_start_executing:
+    if can_start_listening and can_start_executing:
         if action == 'listen':
             # setup shared action file and start time
             init_new_action_file()
+            # update UI selection to the new file
+            select_current_action_in_dropdown()
             # UI updates
             startListenerBtn['state'] = 'disabled'
             startExecuteBtn['state'] = 'disabled'
@@ -157,14 +207,18 @@ def command_adapter(action):
         elif action == 'execute':
             # set the selected action file for replay
             selected = actionFileVar.get().strip() if 'actionFileVar' in globals() else ''
-            if not selected or not os.path.exists(selected):
+            # resolve to actions/ if present
+            sel_path = os.path.join('actions', selected) if selected else ''
+            if not selected:
                 startExecuteBtn['text'] = 'Select a .action file'
                 return
             else:
-                # use selected file
+                # use selected file (prefer actions/, fallback root)
                 global action_file_name
-                action_file_name = selected
+                action_file_name = sel_path if os.path.exists(sel_path) else selected
             # init counters and flags
+            global infinite_replay
+            infinite_replay = bool(infiniteRepeatVar.get()) if 'infiniteRepeatVar' in globals() else False
             execute_time_keyboard = playCount.get()
             execute_time_mouse = playCount.get()
             stop_execute_keyboard = False
@@ -315,7 +369,7 @@ class KeyboardActionExecute(threading.Thread):
         global execute_time_keyboard
         global stop_execute_keyboard
         global pressed_vks
-        while execute_time_keyboard >= 0:
+        while True:
             if stop_execute_keyboard:
                 return
             try:
@@ -378,9 +432,12 @@ class KeyboardActionExecute(threading.Thread):
                         pressed_vks.discard(vk)
                 except Exception:
                     pass
+            if 'infinite_replay' in globals() and infinite_replay:
+                continue
             execute_time_keyboard = execute_time_keyboard - 1
-            if execute_time_keyboard == 0:
+            if execute_time_keyboard <= 0:
                 stop_execute_keyboard = True
+                return
 
 class MouseActionExecute(threading.Thread):
 
@@ -392,7 +449,7 @@ class MouseActionExecute(threading.Thread):
     def run(self):
         global execute_time_mouse
         global stop_execute_mouse
-        while execute_time_mouse >= 0:
+        while True:
             if stop_execute_mouse:
                 return
             try:
@@ -532,9 +589,12 @@ class MouseActionExecute(threading.Thread):
                         pressed_mouse_buttons.discard('right')
                 except Exception:
                     pass
+            if 'infinite_replay' in globals() and infinite_replay:
+                continue
             execute_time_mouse = execute_time_mouse - 1
-            if execute_time_mouse == 0:
+            if execute_time_mouse <= 0:
                 stop_execute_mouse = True
+                return
                 
                 
 ######################################################################
@@ -648,12 +708,21 @@ class HotkeyController(threading.Thread):
                 stop_execute_keyboard = True
                 stop_execute_mouse = True
         
+        last_f10 = 0.0
+        last_f11 = 0.0
+
         def on_press(key):
+            nonlocal last_f10, last_f11
+            now = time.time()
             try:
                 if key == Key.f10:
-                    toggle_record()
+                    if now - last_f10 > 0.3:
+                        last_f10 = now
+                        toggle_record()
                 elif key == Key.f11:
-                    toggle_replay()
+                    if now - last_f11 > 0.3:
+                        last_f11 = now
+                        toggle_replay()
             except Exception:
                 pass
 
@@ -677,84 +746,133 @@ if __name__ == '__main__':
     stop_listen = False
     pressed_vks = set()
     pressed_mouse_buttons = set()
+    infinite_replay = False
     
     root = tkinter.Tk()
-    root.title('Quick Macro - Sean Zou')
-    root.geometry('460x180')
+
+    # Business UI theme setup
+    def setup_business_theme(win):
+        style = ttk.Style()
+        try:
+            # Prefer native-looking theme on Windows
+            style.theme_use('vista')
+        except Exception:
+            pass
+        # pick a cute font if available
+        preferred = [
+            'Segoe UI', 'Microsoft YaHei UI', '微软雅黑', 'Arial'
+        ]
+        fams = set(tkfont.families())
+        font_family = None
+        for f in preferred:
+            if f in fams:
+                font_family = f
+                break
+        if not font_family:
+            font_family = 'Segoe UI'
+
+        bg = '#ffffff'        # white
+        fg = '#1f2937'        # slate-800
+        win.configure(bg=bg)
+
+        # global default font tweaks
+        try:
+            default_font = tkfont.nametofont('TkDefaultFont')
+            default_font.configure(family=font_family, size=12)
+        except Exception:
+            pass
+        # Labels
+        style.configure('Biz.TLabel', background=bg, foreground=fg, font=(font_family, 12))
+        style.configure('BizTitle.TLabel', background=bg, foreground=fg, font=(font_family, 18, 'bold'))
+        # Buttons/Entries/Combobox use native theme visuals; add padding only
+        style.configure('Biz.TButton', font=(font_family, 13), padding=10)
+        style.configure('Biz.TEntry', padding=6)
+        style.configure('Biz.TCombobox', padding=6)
+
+        return font_family, bg
+
+    font_family, bg_color = setup_business_theme(root)
+    ensure_assets_dir()
+    ensure_actions_dir()
+
+    # optional assets: icon and background
+    try:
+        icon_path = os.path.join('assets', 'icon.png')
+        if os.path.exists(icon_path):
+            root._icon_img = tkinter.PhotoImage(file=icon_path)
+            root.iconphoto(True, root._icon_img)
+    except Exception:
+        pass
+    # Business theme: avoid decorative background image for a clean look
+
+    root.title('Quick Macro')
+    root.geometry('720x360')
     root.resizable(0,0)
 
+    # title
+    titleLabel = ttk.Label(root, text='Quick Macro', style='BizTitle.TLabel')
+    titleLabel.place(x=24, y=14, width=220, height=36)
+
+    # Card style containers
+    style = ttk.Style()
+    style.configure('Card.TFrame', background='#f8fafc')
+    style.configure('CardLabel.TLabel', background='#f8fafc', font=(font_family, 10), foreground='#374151')
+    # Ensure checkbutton blends with card background (no visible patch)
+    style.configure('Card.TCheckbutton', background='#f8fafc')
+    style.map('Card.TCheckbutton', background=[('active', '#f8fafc'), ('!active', '#f8fafc')])
+    style.configure('Biz.TButton', anchor='center', font=(font_family, 10), padding=(20, 0))
+    # Explicit centered button style with symmetric padding for perfect centering
+    style.configure('Center.TButton', anchor='center', font=(font_family, 10), padding=(20, 0))
+
+    recordCard = ttk.Frame(root, style='Card.TFrame', borderwidth=1, relief='solid')
+    recordCard.place(x=30, y=70, width=310, height=90)
+    replayCard = ttk.Frame(root, style='Card.TFrame', borderwidth=1, relief='solid')
+    replayCard.place(x=360, y=70, width=330, height=220)
+
     # start recording
-    startListenerBtn = tkinter.Button(root, text="Start recording (F10)", command=lambda: command_adapter('listen'))
-    startListenerBtn.place(x=100, y=20, width=200, height=30)
+    startListenerBtn = ttk.Button(recordCard, text="Start recording (F10)", command=lambda: command_adapter('listen'), style='Center.TButton')
+    startListenerBtn.place(x=15, y=10, width=280, height=44)
 
     # times for replaying
-    playCountLabel = tkinter.Label(root, text='Repeat Times')
-    playCountLabel.place(x=100, y=60, width=120, height=20)
+    playCountLabel = ttk.Label(replayCard, text='Repeat Times', style='CardLabel.TLabel')
+    playCountLabel.place(x=15, y=15, width=120, height=30)
     
     playCount = tkinter.IntVar()
     playCount.set(1)
     
-    playCountEdit = tkinter.Entry(root, textvariable=playCount)
-    playCountEdit.place(x=220, y=60, width=60, height=20)
+    playCountEdit = ttk.Entry(replayCard, textvariable=playCount, style='Biz.TEntry')
+    playCountEdit.place(x=140, y=15, width=80, height=30)
 
-    playCountTipLabel = tkinter.Label(root, text='#')
-    playCountTipLabel.place(x=280, y=60, width=20, height=20)
+    playCountTipLabel = ttk.Label(replayCard, text='#', style='CardLabel.TLabel')
+    playCountTipLabel.place(x=225, y=15, width=20, height=30)
 
-    # action file select
-    actionFileLabel = tkinter.Label(root, text='Action file')
-    actionFileLabel.place(x=100, y=90, width=120, height=20)
+    # infinite repeat checkbox
+    global infiniteRepeatVar
+    infiniteRepeatVar = tkinter.BooleanVar()
+    infiniteRepeatVar.set(False)
+    infiniteCheck = ttk.Checkbutton(replayCard, text='Inf.', variable=infiniteRepeatVar, style='Card.TCheckbutton')
+    infiniteCheck.place(x=250, y=15, width=70, height=30)
+
+    # start replaying button centered in card
+    startExecuteBtn = ttk.Button(replayCard, text="Start replaying (F11)", command=lambda: command_adapter('execute'), style='Center.TButton')
+    startExecuteBtn.place(x=15, y=60, width=280, height=40)
 
     actionFileVar = tkinter.StringVar()
     files = list_action_files()
     actionFileVar.set(files[-1] if files else '')
 
-    def refresh_action_files():
-        files2 = list_action_files()
-        menu = actionFileSelect['menu']
-        menu.delete(0, 'end')
-        for f in files2:
-            menu.add_command(label=f, command=lambda v=f: actionFileVar.set(v))
-        if files2:
-            actionFileVar.set(files2[-1])
-        else:
-            actionFileVar.set('')
+    # Action file controls inside the Replay card
+    actionFileLabel = ttk.Label(replayCard, text='Action file', style='CardLabel.TLabel')
+    actionFileLabel.place(x=15, y=120, width=100, height=26)
+    actionFileSelect = ttk.Combobox(replayCard, textvariable=actionFileVar, values=files if files else [], state='readonly', style='Biz.TCombobox')
+    actionFileSelect.place(x=120, y=120, width=190, height=28)
 
-    actionFileSelect = tkinter.OptionMenu(root, actionFileVar, *(files if files else ['']))
-    actionFileSelect.place(x=220, y=90, width=160, height=24)
-
-    refreshBtn = tkinter.Button(root, text='Refresh', command=refresh_action_files)
-    refreshBtn.place(x=385, y=90, width=60, height=24)
-
-    # start replaying
-    startExecuteBtn = tkinter.Button(root, text="Start replaying (F11)", command=lambda: command_adapter('execute'))
-    startExecuteBtn.place(x=100, y=120, width=200, height=30)
+    # Refresh button removed; list auto-updates after recording
     
     # Start hotkeys listener (F10/F11)
     HotkeyController().start()
 
-    # Fallback: also bind Tk window hotkeys when focused
-    def _tk_toggle_record(_e=None):
-        if can_start_listening and can_start_executing:
-            command_adapter('listen')
-        else:
-            # behave like pressing F10 again during active session
-            try:
-                kb = KeyBoardController()
-                kb.press(Key.esc)
-                kb.release(Key.esc)
-            except Exception:
-                pass
-
-    def _tk_toggle_replay(_e=None):
-        global stop_execute_keyboard, stop_execute_mouse
-        if can_start_listening and can_start_executing:
-            command_adapter('execute')
-        else:
-            stop_execute_keyboard = True
-            stop_execute_mouse = True
-
-    root.bind('<F10>', _tk_toggle_record)
-    root.bind('<F11>', _tk_toggle_replay)
+    # Removed Tk window key binds to avoid double-trigger; global hotkeys handle F10/F11
 
     # Ensure closing window terminates app
     def on_close():

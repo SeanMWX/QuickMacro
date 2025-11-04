@@ -11,8 +11,18 @@ Quick Macro to record and replay mouse and keyboard actions (Tkinter + pynput).
 - Replay: select an `.action` from dropdown, set repeat times, click `Start replaying` or press `F11` to start immediately (ESC/F11 to stop)
 - Hotkeys: `F10` start/stop recording, `F11` start/stop replaying
 
+## UI Theme
+- Switched to a clean, professional (business) ttk theme using native look where possible.
+- Fonts prefer `Segoe UI`/`Microsoft YaHei UI`/`微软雅黑`/`Arial`.
+- Neutral colors, clear spacing, and consistent sizes for a focused workflow.
+
+## Assets
+- Put optional images in `assets/` to customize:
+  - `assets/icon.png` for the window icon
+  - `assets/bg.png` decorative background (business theme does not auto-apply a background image)
+
 ## Action Files (.action)
-- When recording, the app now creates a single `.action` file using a timestamp name like `YYYYMMDD-HHMMSS.action`.
+- When recording, the app now creates a single `.action` file in the `actions/` folder using a timestamp name like `YYYYMMDD-HHMMSS.action`.
 - The format is a simple, line-based pseudo language with timing:
   - `# QuickMacro action v1` header
   - `META SCREEN <w> <h>` record-time screen
@@ -20,7 +30,7 @@ Quick Macro to record and replay mouse and keyboard actions (Tkinter + pynput).
   - Mouse move: `M MOVE <x> <y> [<nx> <ny>] <ms>`
   - Mouse click: `M CLICK <left|right> <DOWN|UP> <x> <y> [<nx> <ny>] <ms>`
   - Mouse scroll: `M SCROLL <dx> <dy> <ms>`
-- In the GUI, select which `.action` to replay from the dropdown and use Refresh to reload the list.
+- In the GUI, select which `.action` to replay from the dropdown (it lists files from `actions/`). The latest recording is auto-selected when you start recording.
 
 ## Fixes in this update
 - Execute phase UI is now coordinated centrally to avoid early reset when mouse and keyboard speeds differ.
