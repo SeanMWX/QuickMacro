@@ -927,7 +927,7 @@ if __name__ == '__main__':
             'line':'#','type':'Type','op':'Op','vk':'VK','btn':'Btn','act':'Act',
             'x':'X','y':'Y','nx':'NX','ny':'NY','dx':'DX','dy':'DY','ms':'MS','raw':'Raw'
         }
-        tree = ttk.Treeview(frame, columns=columns, show='headings', style='Action.Treeview')
+        tree = ttk.Treeview(frame, columns=columns, show='headings', style='Action.Treeview', selectmode='extended')
         for c in columns:
             tree.heading(c, text=headings[c], anchor='center')
         center_cols = ['line','type','op','vk','btn','act','x','y','nx','ny','dx','dy','ms']
@@ -1248,6 +1248,154 @@ if __name__ == '__main__':
         tree.bind('<Button-1>', commit_inline_if_any, add='+')
         editor.bind('<Button-1>', commit_inline_if_any, add='+')
 
+        # Drag-to-reorder support (multi-row with visual insert indicator)
+        dragging_selection = []
+        drag_insert_index = None
+        insert_line = tkinter.Frame(frame, height=2, background='#ff4d4f')
+        # highlight tag for dragging block
+        try:
+            tree.tag_configure('drag_sel', background='#e6f7ff')
+        except Exception:
+            pass
+
+        def clear_drag_highlight():
+            try:
+                for iid in tree.get_children(''):
+                    tags = list(tree.item(iid, 'tags') or [])
+                    if 'drag_sel' in tags:
+                        tags.remove('drag_sel')
+                        tree.item(iid, tags=tuple(tags))
+            except Exception:
+                pass
+
+        def apply_drag_highlight(items):
+            try:
+                clear_drag_highlight()
+                for iid in items:
+                    tags = list(tree.item(iid, 'tags') or [])
+                    if 'drag_sel' not in tags:
+                        tags.append('drag_sel')
+                        tree.item(iid, tags=tuple(tags))
+            except Exception:
+                pass
+
+        pressed_row = None
+
+        def on_tree_press(event):
+            nonlocal dragging_selection, drag_insert_index, pressed_row
+            commit_inline_if_any(event)
+            row = tree.identify_row(event.y)
+            pressed_row = row
+            if not row:
+                dragging_selection = []
+                clear_drag_highlight()
+                return
+            # honor Ctrl/Shift multi-select; only force single select when no modifiers
+            ctrl = (event.state & 0x0004) != 0
+            shift = (event.state & 0x0001) != 0
+            current_sel = list(tree.selection())
+            if (row not in current_sel) and not (ctrl or shift):
+                tree.selection_set((row,))
+            else:
+                # clicked inside current multiselection without modifiers: keep selection intact
+                # and prevent default behavior from collapsing to single selection
+                if (row in current_sel) and not (ctrl or shift):
+                    editor.after(0, lambda: tree.selection_set(tuple(current_sel)))
+                    apply_drag_highlight(current_sel)
+                    drag_insert_index = None
+                    return "break"
+            drag_insert_index = None
+            # do not compute dragging_selection yet; wait until motion so default selection can settle
+            clear_drag_highlight()
+
+        def compute_insert_at(event):
+            children = tree.get_children('')
+            if not children:
+                return 0, 0
+            target = tree.identify_row(event.y)
+            if target:
+                x, y, w, h = tree.bbox(target)
+                above = event.y < (y + h/2)
+                idx = tree.index(target)
+                insert_at = idx if above else idx + 1
+                line_y = y if above else y + h
+                return insert_at, line_y
+            # outside rows
+            first_bbox = tree.bbox(children[0])
+            last_bbox = tree.bbox(children[-1])
+            if event.y < first_bbox[1]:
+                return 0, first_bbox[1]
+            else:
+                return len(children), last_bbox[1] + last_bbox[3]
+
+        def on_tree_motion(event):
+            nonlocal drag_insert_index, dragging_selection
+            if not dragging_selection:
+                # initialize dragging block from current selection (or pressed row)
+                sel_now = list(tree.selection())
+                if not sel_now and pressed_row:
+                    sel_now = [pressed_row]
+                children = tree.get_children('')
+                idx_map = {iid: i for i, iid in enumerate(children)}
+                dragging_selection = sorted(sel_now, key=lambda i: idx_map.get(i, 0))
+                apply_drag_highlight(dragging_selection)
+                # reinforce multiselect throughout drag
+                try:
+                    tree.selection_set(tuple(dragging_selection))
+                except Exception:
+                    pass
+            insert_at, line_y = compute_insert_at(event)
+            drag_insert_index = insert_at
+            try:
+                insert_line.place(in_=tree, x=0, y=line_y, width=tree.winfo_width(), height=2)
+            except Exception:
+                pass
+
+        def on_tree_release(event):
+            nonlocal dragging_selection, drag_insert_index
+            try:
+                insert_line.place_forget()
+            except Exception:
+                pass
+            if not dragging_selection or drag_insert_index is None:
+                dragging_selection = []
+                drag_insert_index = None
+                clear_drag_highlight()
+                return
+            # Build new order by removing selection and inserting it at target index
+            children = list(tree.get_children(''))
+            idx_map = {iid: i for i, iid in enumerate(children)}
+            sel_sorted = sorted(dragging_selection, key=lambda i: idx_map.get(i, 0))
+            base = [iid for iid in children if iid not in sel_sorted]
+            # insertion index in base list
+            insertion = drag_insert_index
+            # subtract how many selected were before the drop index
+            before_count = sum(1 for iid in sel_sorted if idx_map[iid] < drag_insert_index)
+            insertion -= before_count
+            insertion = max(0, min(insertion, len(base)))
+            new_order = base[:insertion] + sel_sorted + base[insertion:]
+            # Apply moves according to new order
+            for pos, iid in enumerate(new_order):
+                try:
+                    tree.move(iid, '', pos)
+                except Exception:
+                    pass
+            renumber_lines()
+            # keep the block selected and focused after move
+            try:
+                tree.selection_set(tuple(sel_sorted))
+                if sel_sorted:
+                    tree.focus(sel_sorted[0])
+            except Exception:
+                pass
+            dragging_selection = []
+            drag_insert_index = None
+            clear_drag_highlight()
+
+        tree.bind('<ButtonPress-1>', on_tree_press, add='+')
+        tree.bind('<B1-Motion>', on_tree_motion, add='+')
+        tree.bind('<ButtonRelease-1>', on_tree_release, add='+')
+
         def start_cell_edit(iid, colname):
             # ensure row visible, then compute bbox for column and spawn editor
             tree.see(iid)
@@ -1339,10 +1487,7 @@ if __name__ == '__main__':
         add_btn.pack(side='left')
         del_btn = ttk.Button(btn_frame, text='Delete', command=delete_rows)
         del_btn.pack(side='left', padx=6)
-        up_btn = ttk.Button(btn_frame, text='Up', command=move_up)
-        up_btn.pack(side='left', padx=6)
-        down_btn = ttk.Button(btn_frame, text='Down', command=move_down)
-        down_btn.pack(side='left', padx=6)
+        # Removed Up/Down buttons in favor of drag-to-reorder
 
     editBtn = ttk.Button(replayCard, text='Edit', command=open_action_editor, style='Biz.TButton')
     editBtn.place(x=120, y=155, width=80, height=28)
