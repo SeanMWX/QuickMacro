@@ -259,14 +259,13 @@ def command_adapter(action):
                 pass
             # UI updates
             update_ui_for_state(AppState.RECORDING)
-            # start recorder (keyboard + mouse) and listen controller for ESC
+            # start recorder (keyboard + mouse)
             try:
                 global current_recorder
                 current_recorder = Recorder(action_file_name, ev_stop_listen)
                 current_recorder.start()
             except Exception:
                 pass
-            ListenController().start()
             can_start_listening = False
             can_start_executing = False
 
@@ -656,7 +655,7 @@ class HotkeyController(threading.Thread):
     def run(self):
         def toggle_record():
             global can_start_listening, can_start_executing
-            global root
+            global root, ev_stop_listen
             # if idle, start recording; else stop via ESC
             if can_start_listening and can_start_executing:
                 try:
@@ -665,10 +664,16 @@ class HotkeyController(threading.Thread):
                 except Exception:
                     command_adapter('listen')
             else:
+                # do NOT inject ESC; directly signal recorder to stop
                 try:
-                    kb = KeyBoardController()
-                    kb.press(Key.esc)
-                    kb.release(Key.esc)
+                    ev_stop_listen.set()
+                except Exception:
+                    pass
+                # reset UI state immediately
+                try:
+                    can_start_listening = True
+                    can_start_executing = True
+                    root.after(0, lambda: update_ui_for_state(AppState.IDLE))
                 except Exception:
                     pass
 
@@ -811,7 +816,7 @@ if __name__ == '__main__':
     style.configure('Card.TFrame', background='#f8fafc')
     style.configure('CardLabel.TLabel', background='#f8fafc', font=(font_family, 10), foreground='#374151')
     # Ensure checkbutton blends with card background (no visible patch)
-    style.configure('Card.TCheckbutton', background='#f8fafc')
+    style.configure('Card.TCheckbutton', background='#f8fafc', font=(font_family, 10))
     style.map('Card.TCheckbutton', background=[('active', '#f8fafc'), ('!active', '#f8fafc')])
     style.configure('Biz.TButton', anchor='center', font=(font_family, 10), padding=(20, 0))
     # Explicit centered button style with symmetric padding for perfect centering
@@ -855,7 +860,7 @@ if __name__ == '__main__':
     gameModeVar = tkinter.BooleanVar()
     gameModeVar.set(False)
     gameModeCheck = ttk.Checkbutton(replayCard, text='Game mode (relative mouse)', variable=gameModeVar, style='Card.TCheckbutton')
-    gameModeCheck.place(x=15, y=100, width=290, height=26)
+    gameModeCheck.place(x=15, y=105, width=290, height=26)
 
     # UI state helper
     class AppState:
@@ -872,7 +877,7 @@ if __name__ == '__main__':
         elif state == AppState.RECORDING:
             startListenerBtn['state'] = 'disabled'
             startExecuteBtn['state'] = 'disabled'
-            startListenerBtn['text'] = 'Recording, "ESC/F10" to stop.'
+            startListenerBtn['text'] = 'Recording, "F10" to stop.'
         elif state == AppState.REPLAYING:
             startListenerBtn['state'] = 'disabled'
             startExecuteBtn['state'] = 'disabled'
@@ -884,9 +889,9 @@ if __name__ == '__main__':
 
     # Action file controls inside the Replay card
     actionFileLabel = ttk.Label(replayCard, text='Action file', style='CardLabel.TLabel')
-    actionFileLabel.place(x=15, y=120, width=100, height=26)
+    actionFileLabel.place(x=15, y=140, width=100, height=26)
     actionFileSelect = ttk.Combobox(replayCard, textvariable=actionFileVar, values=files if files else [], state='readonly', style='Biz.TCombobox')
-    actionFileSelect.place(x=120, y=120, width=190, height=28)
+    actionFileSelect.place(x=120, y=140, width=190, height=28)
 
     # Refresh button removed; list auto-updates after recording
     
@@ -1534,9 +1539,9 @@ if __name__ == '__main__':
         # Removed Up/Down buttons in favor of drag-to-reorder
 
     editBtn = ttk.Button(replayCard, text='Edit', command=open_action_editor, style='Biz.TButton')
-    editBtn.place(x=120, y=155, width=80, height=28)
+    editBtn.place(x=120, y=175, width=80, height=28)
     openBtn = ttk.Button(replayCard, text='Folder', command=open_actions_folder, style='Biz.TButton')
-    openBtn.place(x=15, y=155, width=100, height=28)
+    openBtn.place(x=15, y=175, width=100, height=28)
     
     # Start hotkeys listener (F10/F11)
     HotkeyController().start()
