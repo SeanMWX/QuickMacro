@@ -37,13 +37,6 @@ class KeyboardRecorder(threading.Thread):
             self.writer.write_line(f"K DOWN {vk} {t}")
 
         def on_release(key):
-            if key == Key.esc:
-                try:
-                    self.stop_event.set()
-                except Exception:
-                    pass
-                kb.stop()
-                return False
             if self.stop_event.is_set():
                 kb.stop(); return False
             if key in (keyboard.Key.f10, keyboard.Key.f11):
@@ -117,4 +110,3 @@ class Recorder:
         self.ms_thread = MouseRecorder(self._writer, self.stop_event, self._start_mono)
         self.kb_thread.start()
         self.ms_thread.start()
-

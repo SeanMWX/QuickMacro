@@ -1,0 +1,251 @@
+######################################################################
+# Listen
+###################################################################### 
+class KeyboardActionListener(threading.Thread):
+    
+    def __init__(self, file_name='keyboard.action'):
+        super().__init__()
+        self.daemon = True
+        self.file_name = file_name
+
+    def run(self):
+        # Deprecated: use core.recorder.Recorder
+        return
+                
+
+class MouseActionListener(threading.Thread):
+
+    def __init__(self, file_name='mouse.action'):
+        super().__init__()
+        self.daemon = True
+        self.file_name = file_name
+
+    def run(self):
+        # Deprecated: use core.recorder.Recorder
+        return
+
+
+######################################################################
+# Executing
+######################################################################
+class KeyboardActionExecute(threading.Thread):
+
+    def __init__(self, file_name='keyboard.action'):
+        super().__init__()
+        self.daemon = True
+        self.file_name = file_name
+
+    def run(self):
+        global execute_time_keyboard
+        global ev_stop_execute_keyboard
+        global pressed_vks
+        while True:
+            if ev_stop_execute_keyboard.is_set():
+                return
+            try:
+                path = action_file_name if os.path.exists(action_file_name) else self.file_name
+                with open(path, 'r', encoding='utf-8') as file:
+                    keyboard_exec = KeyBoardController()
+                    start_ts = time.monotonic()
+                    line = file.readline()
+                    while line:
+                        s = line.strip()
+                        if not s:
+                            line = file.readline(); continue
+                        d = action_parse_line(s)
+                        if d.get('type') == 'VK':
+                            try:
+                                t_ms = int(d.get('ms') or 0)
+                            except Exception:
+                                t_ms = 0
+                            target = start_ts + (t_ms/1000.0)
+                            if not wait_until_or_stop(target, ev_stop_execute_keyboard):
+                                break
+                            try:
+                                vk = int(d.get('vk') or 0)
+                                if d.get('op') == 'DOWN':
+                                    keyboard_exec.press(KeyCode.from_vk(vk))
+                                    pressed_vks.add(vk)
+                                elif d.get('op') == 'UP':
+                                    keyboard_exec.release(KeyCode.from_vk(vk))
+                                    pressed_vks.discard(vk)
+                            except Exception:
+                                pass
+                        else:
+                            # legacy json support
+                            try:
+                                obj = json.loads(line)
+                                if obj.get('name') == 'keyboard':
+                                    if obj['event'] == 'press':
+                                        vk = obj['vk']
+                                        keyboard_exec.press(KeyCode.from_vk(vk))
+                                        pressed_vks.add(vk)
+                                    elif obj['event'] == 'release':
+                                        vk = obj['vk']
+                                        keyboard_exec.release(KeyCode.from_vk(vk))
+                                        pressed_vks.discard(vk)
+                                    time.sleep(0.005)
+                            except Exception:
+                                pass
+                        line = file.readline()
+            finally:
+                # ensure all pressed keys are released
+                try:
+                    keyboard_exec = KeyBoardController()
+                    for vk in list(pressed_vks):
+                        try:
+                            keyboard_exec.release(KeyCode.from_vk(vk))
+                        except Exception:
+                            pass
+                        pressed_vks.discard(vk)
+                except Exception:
+                    pass
+            if 'ev_infinite_replay' in globals() and ev_infinite_replay.is_set():
+                continue
+            execute_time_keyboard = execute_time_keyboard - 1
+            if execute_time_keyboard <= 0:
+                try:
+                    ev_stop_execute_keyboard.set()
+                except Exception:
+                    pass
+                return
+
+class MouseActionExecute(threading.Thread):
+
+    def __init__(self, file_name='mouse.action'):
+        super().__init__()
+        self.daemon = True
+        self.file_name = file_name
+
+    def run(self):
+        global execute_time_mouse
+        global ev_stop_execute_mouse
+        while True:
+            if ev_stop_execute_mouse.is_set():
+                return
+            try:
+                path = action_file_name if os.path.exists(action_file_name) else self.file_name
+                with open(path, 'r', encoding='utf-8') as file:
+                    mouse_exec = MouseController()
+                    # playback-time screen size
+                    cw, ch = get_screen_size()
+                    rw, rh = cw, ch
+                    start_ts = time.monotonic()
+                    # pressed buttons tracking for cleanup
+                    global pressed_mouse_buttons
+                    line = file.readline()
+                    while line:
+                        s = line.strip()
+                        if not s:
+                            line = file.readline(); continue
+                        d = action_parse_line(s)
+                        if d.get('type') == 'META' and d.get('op') == 'SCREEN':
+                            try:
+                                rw = int(d.get('x') or cw); rh = int(d.get('y') or ch)
+                            except Exception:
+                                rw, rh = cw, ch
+                        elif d.get('type') == 'MS':
+                            # compute target time
+                            try:
+                                t_ms = int(d.get('ms') or 0)
+                            except Exception:
+                                t_ms = 0
+                            target = start_ts + (t_ms/1000.0)
+                            if not wait_until_or_stop(target, ev_stop_execute_mouse):
+                                break
+                            if d.get('op') == 'MOVE':
+                                try:
+                                    x = int(d.get('x') or 0); y = int(d.get('y') or 0)
+                                except Exception:
+                                    x = y = 0
+                                nx = d.get('nx'); ny = d.get('ny')
+                                use_norm = False
+                                try:
+                                    if rw and rh and (abs(cw - rw)/float(rw) > 0.02 or abs(ch - rh)/float(rh) > 0.02):
+                                        use_norm = (nx not in (None,'') and ny not in (None,''))
+                                except Exception:
+                                    use_norm = False
+                                tx = int(round(float(nx) * float(cw))) if use_norm else x
+                                ty = int(round(float(ny) * float(ch))) if use_norm else y
+                                mouse_exec.position = (tx, ty)
+                            elif d.get('op') == 'CLICK':
+                                btn = d.get('btn') or 'left'; act = d.get('act') or 'DOWN'
+                                try:
+                                    x = int(d.get('x') or 0); y = int(d.get('y') or 0)
+                                except Exception:
+                                    x = y = 0
+                                nx = d.get('nx'); ny = d.get('ny')
+                                use_norm = False
+                                try:
+                                    if rw and rh and (abs(cw - rw)/float(rw) > 0.02 or abs(ch - rh)/float(rh) > 0.02):
+                                        use_norm = (nx not in (None,'') and ny not in (None,''))
+                                except Exception:
+                                    use_norm = False
+                                tx = int(round(float(nx) * float(cw))) if use_norm else x
+                                ty = int(round(float(ny) * float(ch))) if use_norm else y
+                                try:
+                                    mouse_exec.position = (tx, ty)
+                                except Exception:
+                                    pass
+                                if act == 'DOWN':
+                                    if btn == 'left':
+                                        mouse_exec.press(Button.left); pressed_mouse_buttons.add('left')
+                                    else:
+                                        mouse_exec.press(Button.right); pressed_mouse_buttons.add('right')
+                                else:
+                                    if btn == 'left':
+                                        mouse_exec.release(Button.left); pressed_mouse_buttons.discard('left')
+                                    else:
+                                        mouse_exec.release(Button.right); pressed_mouse_buttons.discard('right')
+                            elif d.get('op') == 'SCROLL':
+                                try:
+                                    dx = int(d.get('dx') or 0); dy = int(d.get('dy') or 0)
+                                except Exception:
+                                    dx = dy = 0
+                                mouse_exec.scroll(dx, dy)
+                        else:
+                            # legacy json support
+                            try:
+                                obj = json.loads(line)
+                                if obj.get('name') == 'meta':
+                                    rw = int(obj['screen']['w']); rh = int(obj['screen']['h'])
+                                elif obj.get('name') == 'mouse':
+                                    if obj['event'] == 'move':
+                                        mouse_exec.position = (int(obj['location']['x']), int(obj['location']['y']))
+                                        time.sleep(0.005)
+                                    elif obj['event'] == 'click':
+                                        if obj['action']:
+                                            (mouse_exec.press(Button.left) if obj['target']=='left' else mouse_exec.press(Button.right))
+                                        else:
+                                            (mouse_exec.release(Button.left) if obj['target']=='left' else mouse_exec.release(Button.right))
+                                        time.sleep(0.005)
+                                    elif obj['event'] == 'scroll':
+                                        mouse_exec.scroll(obj['location']['x'], obj['location']['y'])
+                                        time.sleep(0.005)
+                            except Exception:
+                                pass
+                        line = file.readline()
+            finally:
+                # ensure buttons are released
+                try:
+                    mouse_exec = MouseController()
+                    if 'left' in pressed_mouse_buttons:
+                        mouse_exec.release(Button.left)
+                        pressed_mouse_buttons.discard('left')
+                    if 'right' in pressed_mouse_buttons:
+                        mouse_exec.release(Button.right)
+                        pressed_mouse_buttons.discard('right')
+                except Exception:
+                    pass
+            if 'ev_infinite_replay' in globals() and ev_infinite_replay.is_set():
+                continue
+            execute_time_mouse = execute_time_mouse - 1
+            if execute_time_mouse <= 0:
+                try:
+                    ev_stop_execute_mouse.set()
+                except Exception:
+                    pass
+                return
+                
+                
+######################################################################

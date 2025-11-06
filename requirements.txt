@@ -1,1 +1,2 @@
 pynput>=1.7
+pydirectinput>=1.0.0

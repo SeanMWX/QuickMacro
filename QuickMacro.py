@@ -1,5 +1,7 @@
 import json
 import logging
+import sys
+import logging
 import ctypes
 import os
 import glob
@@ -41,6 +43,41 @@ def set_process_dpi_aware():
         ctypes.windll.user32.SetProcessDPIAware()
     except Exception:
         pass
+
+def _win_message_box(title, text, flags=0x40):
+    try:
+        ctypes.windll.user32.MessageBoxW(None, str(text), str(title), flags)
+    except Exception:
+        pass
+
+def _is_running_as_admin():
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+def relaunch_as_admin_if_needed():
+    """Windows: 若非管理员尝试以管理员重启自身；失败时提示用户手动以管理员运行。"""
+    try:
+        if os.name != 'nt':
+            return
+        if _is_running_as_admin():
+            logging.info('Admin check: running as administrator.')
+            return
+        script = os.path.abspath(__file__)
+        params = ' '.join([f'"{script}"'] + [f'"{a}"' for a in sys.argv[1:]])
+        logging.info('Admin check: attempting UAC elevation...')
+        rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 1)
+        if rc > 32:
+            os._exit(0)
+        else:
+            logging.warning(f'UAC elevation failed, rc={rc}.')
+            _win_message_box('需要管理员权限', '未能自动获取管理员权限，请右键以管理员方式运行 QuickMacro。\n否则游戏内全局热键与鼠标可能失效。', 0x30)
+    except Exception as e:
+        try:
+            logging.exception('UAC elevation exception: %s', e)
+        except Exception:
+            pass
 
 def release_all_inputs():
     # Release any keys/buttons that might have been left pressed
@@ -128,11 +165,22 @@ def save_settings():
             data['last_action'] = val
     except Exception:
         pass
+    # persist game mode selection if available
+    try:
+        data['game_mode_relative'] = bool(gameModeVar.get())
+    except Exception:
+        pass
     settings_mod.save_settings(data, SETTINGS_PATH)
 
 def apply_settings_to_ui(settings: dict):
     try:
         settings_mod.apply_settings_to_ui(settings, playCount, infiniteRepeatVar, actionFileVar, list_action_files)
+    except Exception:
+        pass
+    # apply game mode selection from settings
+    try:
+        if 'game_mode_relative' in settings and 'gameModeVar' in globals():
+            gameModeVar.set(bool(settings.get('game_mode_relative', False)))
     except Exception:
         pass
 
@@ -253,7 +301,12 @@ def command_adapter(action):
             # start replayer (keyboard + mouse) and controller (ESC monitor)
             try:
                 global current_replayer
-                current_replayer = Replayer(action_file_name, ev_stop_execute_keyboard, ev_stop_execute_mouse, ev_infinite_replay, execute_time_keyboard)
+                use_rel = False
+                try:
+                    use_rel = bool(gameModeVar.get())
+                except Exception:
+                    pass
+                current_replayer = Replayer(action_file_name, ev_stop_execute_keyboard, ev_stop_execute_mouse, ev_infinite_replay, execute_time_keyboard, use_rel)
                 current_replayer.start()
             except Exception:
                 pass
@@ -668,6 +721,11 @@ if __name__ == '__main__':
         logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s %(message)s')
     except Exception:
         pass
+    # UAC: attempt to elevate before creating any UI (Windows)
+    try:
+        relaunch_as_admin_if_needed()
+    except Exception:
+        pass
     # Ensure DPI awareness before creating Tk to avoid window size jumps
     set_process_dpi_aware()
 
@@ -792,6 +850,13 @@ if __name__ == '__main__':
     startExecuteBtn = ttk.Button(replayCard, text="Start replaying (F11)", command=lambda: command_adapter('execute'), style='Center.TButton')
     startExecuteBtn.place(x=15, y=60, width=280, height=40)
 
+    # Game mode (relative mouse) toggle
+    global gameModeVar
+    gameModeVar = tkinter.BooleanVar()
+    gameModeVar.set(False)
+    gameModeCheck = ttk.Checkbutton(replayCard, text='Game mode (relative mouse)', variable=gameModeVar, style='Card.TCheckbutton')
+    gameModeCheck.place(x=15, y=100, width=290, height=26)
+
     # UI state helper
     class AppState:
         IDLE = 'idle'
@@ -850,6 +915,14 @@ if __name__ == '__main__':
         actionFileSelect.bind('<<ComboboxSelected>>', lambda *_: save_settings())
     except Exception:
         pass
+    # Persist game mode changes
+    try:
+        gameModeVar.trace_add('write', lambda *_: save_settings())
+    except Exception:
+        try:
+            gameModeVar.trace('w', lambda *_: save_settings())
+        except Exception:
+            pass
     
     # Editor for .action files (Excel-like simple table: line number + text)
     def resolve_selected_action_path():

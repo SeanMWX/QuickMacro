@@ -12,6 +12,9 @@ class Settings:
     play_count: int = 1
     infinite: bool = False
     last_action: str = ''
+    game_mode_relative: bool = False
+    game_mode_gain: float = 1.0
+    game_mode_auto: bool = True
 
     @staticmethod
     def load(path: str = DEFAULT_PATH) -> 'Settings':
@@ -23,6 +26,9 @@ class Settings:
                         play_count=int(data.get('play_count', 1) or 1),
                         infinite=bool(data.get('infinite', False)),
                         last_action=str(data.get('last_action', '') or ''),
+                        game_mode_relative=bool(data.get('game_mode_relative', False)),
+                        game_mode_gain=float(data.get('game_mode_gain', 1.0) or 1.0),
+                        game_mode_auto=bool(data.get('game_mode_auto', True)),
                     )
         except Exception:
             pass
@@ -47,6 +53,9 @@ def save_settings(data: Dict, path: str = DEFAULT_PATH) -> None:
             play_count=int(data.get('play_count', 1) or 1),
             infinite=bool(data.get('infinite', False)),
             last_action=str(data.get('last_action', '') or ''),
+            game_mode_relative=bool(data.get('game_mode_relative', False)),
+            game_mode_gain=float(data.get('game_mode_gain', 1.0) or 1.0),
+            game_mode_auto=bool(data.get('game_mode_auto', True)),
         )
         s.save(path)
     except Exception:
@@ -75,4 +84,3 @@ def apply_settings_to_ui(settings: Dict, playCountVar, infiniteVar, actionVar, l
                     pass
     except Exception:
         pass
-

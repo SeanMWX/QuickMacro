@@ -1,0 +1,229 @@
+    1: import threading
+    2: import time
+    3: import json
+    4: from pynput.keyboard import Controller as KeyBoardController, KeyCode
+    5: from pynput.mouse import Button, Controller as MouseController
+    6: from core.actions import parse_action_line
+    7: from core.utils import wait_until_or_stop, get_screen_size
+    8: 
+    9: 
+   10: class KeyboardReplayer(threading.Thread):
+   11:     def __init__(self, path, stop_event, infinite_event, repeat_count: int):
+   12:         super().__init__()
+   13:         self.daemon = True
+   14:         self.path = path
+   15:         self.stop_event = stop_event
+   16:         self.infinite_event = infinite_event
+   17:         self.repeat_count = repeat_count
+   18:         self._pressed = set()
+   19: 
+   20:     def run(self):
+   21:         while True:
+   22:             if self.stop_event.is_set():
+   23:                 return
+   24:             try:
+   25:                 with open(self.path, 'r', encoding='utf-8') as f:
+   26:                     kb = KeyBoardController()
+   27:                     start_ts = time.monotonic()
+   28:                     for line in f:
+   29:                         if self.stop_event.is_set():
+   30:                             break
+   31:                         s = line.strip()
+   32:                         if not s:
+   33:                             continue
+   34:                         d = parse_action_line(s)
+   35:                         if d.get('type') == 'VK':
+   36:                             try:
+   37:                                 t_ms = int(d.get('ms') or 0)
+   38:                             except Exception:
+   39:                                 t_ms = 0
+   40:                             target = start_ts + (t_ms/1000.0)
+   41:                             if not wait_until_or_stop(target, self.stop_event):
+   42:                                 break
+   43:                             try:
+   44:                                 vk = int(d.get('vk') or 0)
+   45:                                 if d.get('op') == 'DOWN':
+   46:                                     kb.press(KeyCode.from_vk(vk)); self._pressed.add(vk)
+   47:                                 elif d.get('op') == 'UP':
+   48:                                     kb.release(KeyCode.from_vk(vk)); self._pressed.discard(vk)
+   49:                             except Exception:
+   50:                                 pass
+   51:                         else:
+   52:                             # legacy JSON support
+   53:                             try:
+   54:                                 obj = json.loads(line)
+   55:                                 if obj.get('name') == 'keyboard':
+   56:                                     if obj['event'] == 'press':
+   57:                                         vk = obj['vk']; kb.press(KeyCode.from_vk(vk)); self._pressed.add(vk)
+   58:                                     elif obj['event'] == 'release':
+   59:                                         vk = obj['vk']; kb.release(KeyCode.from_vk(vk)); self._pressed.discard(vk)
+   60:                             except Exception:
+   61:                                 pass
+   62:             finally:
+   63:                 try:
+   64:                     kb = KeyBoardController()
+   65:                     for vk in list(self._pressed):
+   66:                         try:
+   67:                             kb.release(KeyCode.from_vk(vk))
+   68:                         except Exception:
+   69:                             pass
+   70:                         self._pressed.discard(vk)
+   71:                 except Exception:
+   72:                     pass
+   73:             if self.infinite_event.is_set():
+   74:                 continue
+   75:             self.repeat_count -= 1
+   76:             if self.repeat_count <= 0:
+   77:                 try:
+   78:                     self.stop_event.set()
+   79:                 except Exception:
+   80:                     pass
+   81:                 return
+   82: 
+   83: 
+   84: class MouseReplayer(threading.Thread):
+   85:     def __init__(self, path, stop_event, infinite_event, repeat_count: int):
+   86:         super().__init__()
+   87:         self.daemon = True
+   88:         self.path = path
+   89:         self.stop_event = stop_event
+   90:         self.infinite_event = infinite_event
+   91:         self.repeat_count = repeat_count
+   92:         self._pressed = set()
+   93: 
+   94:     def run(self):
+   95:         while True:
+   96:             if self.stop_event.is_set():
+   97:                 return
+   98:             try:
+   99:                 with open(self.path, 'r', encoding='utf-8') as f:
+  100:                     ms = MouseController()
+  101:                     cw, ch = get_screen_size()
+  102:                     rw, rh = cw, ch
+  103:                     start_ts = time.monotonic()
+  104:                     for line in f:
+  105:                         if self.stop_event.is_set():
+  106:                             break
+  107:                         s = line.strip()
+  108:                         if not s:
+  109:                             continue
+  110:                         d = parse_action_line(s)
+  111:                         if d.get('type') == 'META' and d.get('op') == 'SCREEN':
+  112:                             try:
+  113:                                 rw = int(d.get('x') or cw); rh = int(d.get('y') or ch)
+  114:                             except Exception:
+  115:                                 rw, rh = cw, ch
+  116:                             continue
+  117:                         if d.get('type') != 'MS':
+  118:                             # legacy JSON support
+  119:                             try:
+  120:                                 obj = json.loads(line)
+  121:                                 if obj.get('name') == 'meta':
+  122:                                     rw = int(obj['screen']['w']); rh = int(obj['screen']['h'])
+  123:                                 elif obj.get('name') == 'mouse':
+  124:                                     # no timing for legacy
+  125:                                     if obj['event'] == 'move':
+  126:                                         ms.position = (int(obj['location']['x']), int(obj['location']['y']))
+  127:                                     elif obj['event'] == 'click':
+  128:                                         if obj['action']:
+  129:                                             (ms.press(Button.left) if obj['target']=='left' else ms.press(Button.right))
+  130:                                         else:
+  131:                                             (ms.release(Button.left) if obj['target']=='left' else ms.release(Button.right))
+  132:                                     elif obj['event'] == 'scroll':
+  133:                                         ms.scroll(obj['location']['x'], obj['location']['y'])
+  134:                             except Exception:
+  135:                                 pass
+  136:                             continue
+  137: 
+  138:                         # timing
+  139:                         try:
+  140:                             t_ms = int(d.get('ms') or 0)
+  141:                         except Exception:
+  142:                             t_ms = 0
+  143:                         target = start_ts + (t_ms/1000.0)
+  144:                         if not wait_until_or_stop(target, self.stop_event):
+  145:                             break
+  146: 
+  147:                         op = (d.get('op') or '').upper()
+  148:                         if op == 'MOVE':
+  149:                             try:
+  150:                                 x = int(d.get('x') or 0); y = int(d.get('y') or 0)
+  151:                             except Exception:
+  152:                                 x = y = 0
+  153:                             nx = d.get('nx'); ny = d.get('ny')
+  154:                             use_norm = False
+  155:                             try:
+  156:                                 if rw and rh and (abs(cw - rw)/float(rw) > 0.02 or abs(ch - rh)/float(rh) > 0.02):
+  157:                                     use_norm = (nx not in (None,'') and ny not in (None,''))
+  158:                             except Exception:
+  159:                                 use_norm = False
+  160:                             tx = int(round(float(nx) * float(cw))) if use_norm else x
+  161:                             ty = int(round(float(ny) * float(ch))) if use_norm else y
+  162:                             ms.position = (tx, ty)
+  163:                         elif op == 'CLICK':
+  164:                             btn = d.get('btn') or 'left'; act = d.get('act') or 'DOWN'
+  165:                             try:
+  166:                                 x = int(d.get('x') or 0); y = int(d.get('y') or 0)
+  167:                             except Exception:
+  168:                                 x = y = 0
+  169:                             nx = d.get('nx'); ny = d.get('ny')
+  170:                             use_norm = False
+  171:                             try:
+  172:                                 if rw and rh and (abs(cw - rw)/float(rw) > 0.02 or abs(ch - rh)/float(rh) > 0.02):
+  173:                                     use_norm = (nx not in (None,'') and ny not in (None,''))
+  174:                             except Exception:
+  175:                                 use_norm = False
+  176:                             tx = int(round(float(nx) * float(cw))) if use_norm else x
+  177:                             ty = int(round(float(ny) * float(ch))) if use_norm else y
+  178:                             try:
+  179:                                 ms.position = (tx, ty)
+  180:                             except Exception:
+  181:                                 pass
+  182:                             if act == 'DOWN':
+  183:                                 if btn == 'left': ms.press(Button.left); self._pressed.add('left')
+  184:                                 else: ms.press(Button.right); self._pressed.add('right')
+  185:                             else:
+  186:                                 if btn == 'left': ms.release(Button.left); self._pressed.discard('left')
+  187:                                 else: ms.release(Button.right); self._pressed.discard('right')
+  188:                         elif op == 'SCROLL':
+  189:                             try:
+  190:                                 dx = int(d.get('dx') or 0); dy = int(d.get('dy') or 0)
+  191:                             except Exception:
+  192:                                 dx = dy = 0
+  193:                             ms.scroll(dx, dy)
+  194:             finally:
+  195:                 try:
+  196:                     ms = MouseController()
+  197:                     if 'left' in self._pressed:
+  198:                         ms.release(Button.left); self._pressed.discard('left')
+  199:                     if 'right' in self._pressed:
+  200:                         ms.release(Button.right); self._pressed.discard('right')
+  201:                 except Exception:
+  202:                     pass
+  203:             if self.infinite_event.is_set():
+  204:                 continue
+  205:             self.repeat_count -= 1
+  206:             if self.repeat_count <= 0:
+  207:                 try:
+  208:                     self.stop_event.set()
+  209:                 except Exception:
+  210:                     pass
+  211:                 return
+  212: 
+  213: 
+  214: class Replayer:
+  215:     def __init__(self, path, stop_event_kb, stop_event_ms, infinite_event, repeat_count: int):
+  216:         self.path = path
+  217:         self.stop_event_kb = stop_event_kb
+  218:         self.stop_event_ms = stop_event_ms
+  219:         self.infinite_event = infinite_event
+  220:         self.repeat_count = repeat_count
+  221:         self.kb_thread = None
+  222:         self.ms_thread = None
+  223: 
+  224:     def start(self):
+  225:         self.kb_thread = KeyboardReplayer(self.path, self.stop_event_kb, self.infinite_event, self.repeat_count)
+  226:         self.ms_thread = MouseReplayer(self.path, self.stop_event_ms, self.infinite_event, self.repeat_count)
+  227:         self.kb_thread.start()
+  228:         self.ms_thread.start()
+  229: 
