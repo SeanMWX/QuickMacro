@@ -357,6 +357,7 @@ def command_adapter(action):
     global execute_time_keyboard
     global execute_time_mouse
     global action_file_name
+    global monitor_thread, pending_main_action, pending_main_playcount, restarting_flag, restart_back_job
     
     # command list
     custom_thread_list = []
@@ -422,7 +423,7 @@ def command_adapter(action):
                 pass
             # start monitor thread (template detection) if image exists
             try:
-                global monitor_thread, pending_main_action, restarting_flag
+                global monitor_thread, pending_main_action, pending_main_playcount, restarting_flag
                 monitor_img = os.path.join('assets', 'monitor_target.png')
                 if os.path.exists(monitor_img):
                     # stop previous monitor if any
@@ -440,11 +441,15 @@ def command_adapter(action):
                     def _restart_main():
                         # run restart.action once, then resume original main action
                         try:
-                            global can_start_listening, can_start_executing, pending_main_action, restarting_flag
+                            global can_start_listening, can_start_executing, pending_main_action, pending_main_playcount, restarting_flag, restart_back_job, action_file_name
                             if restarting_flag:
                                 return
                             restarting_flag = True
                             pending_main_action = action_file_name
+                            try:
+                                pending_main_playcount = playCount.get()
+                            except Exception:
+                                pending_main_playcount = None
                             actionFileVar.set('restart.action')
 
                             def _replayer_busy():
@@ -469,6 +474,72 @@ def command_adapter(action):
                             can_start_listening = True
                             can_start_executing = True
                             root.after(0, _launch_restart)
+                            # schedule hard switch back after 13s
+                            if restart_back_job:
+                                try:
+                                    root.after_cancel(restart_back_job)
+                                except Exception:
+                                    pass
+                            def _switch_back_from_restart():
+                                global pending_main_action, pending_main_playcount, restarting_flag, action_file_name, restart_back_job, can_start_listening, can_start_executing
+                                main_path = pending_main_action
+                                main_playcount = pending_main_playcount
+                                # request current restart run to stop
+                                try:
+                                    ev_stop_execute_keyboard.set()
+                                    ev_stop_execute_mouse.set()
+                                except Exception:
+                                    pass
+                                # resolve main path
+                                try:
+                                    if main_path and (not os.path.exists(main_path)):
+                                        cand = os.path.join('actions', os.path.basename(main_path))
+                                        if os.path.exists(cand):
+                                            main_path = cand
+                                except Exception:
+                                    pass
+                                def _resume_main():
+                                    global pending_main_action, pending_main_playcount
+                                    try:
+                                        if not main_path:
+                                            pending_main_action = None
+                                            pending_main_playcount = None
+                                            restarting_flag = False
+                                            restart_back_job = None
+                                            can_start_listening = True
+                                            can_start_executing = True
+                                            return
+                                        action_file_name = main_path
+                                        actionFileVar.set(os.path.basename(main_path))
+                                        if main_playcount not in (None, ''):
+                                            playCount.set(int(main_playcount))
+                                    except Exception:
+                                        pass
+                                    try:
+                                        ev_stop_execute_keyboard.clear()
+                                        ev_stop_execute_mouse.clear()
+                                    except Exception:
+                                        pass
+                                    pending_main_action = None
+                                    pending_main_playcount = None
+                                    restarting_flag = False
+                                    restart_back_job = None
+                                    can_start_listening = True
+                                    can_start_executing = True
+                                    try:
+                                        root.after(0, lambda: command_adapter('execute'))
+                                    except Exception:
+                                        pass
+                                def _wait_until_stopped():
+                                    if not _replayer_busy():
+                                        _resume_main()
+                                    else:
+                                        try:
+                                            root.after(100, _wait_until_stopped)
+                                        except Exception:
+                                            pass
+                                _wait_until_stopped()
+                            restart_back_job = root.after(13000, _switch_back_from_restart)
                         except Exception:
                             pass
                     try:
@@ -484,6 +555,8 @@ def command_adapter(action):
                         hit_callback=on_monitor_hit
                     )
                     monitor_thread.start()
+
+                    # restart fallback handled inside monitor timeout flow
             except Exception:
                 pass
             # UI updates
@@ -1203,7 +1276,9 @@ if __name__ == '__main__':
     # Monitor thread handle
     monitor_thread = None
     pending_main_action = None
+    pending_main_playcount = None
     restarting_flag = False
+    restart_back_job = None
 
     def on_monitor_hit():
         # mark dungeon start at first detection of target image
