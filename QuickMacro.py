@@ -13,6 +13,9 @@ import tkinter
 from tkinter import ttk
 import tkinter.font as tkfont
 import tkinter.messagebox as messagebox
+import cv2
+import numpy as np
+import pyautogui
 
 from pynput import keyboard, mouse
 from pynput.keyboard import Controller as KeyBoardController, KeyCode, Key
@@ -135,6 +138,7 @@ def ensure_assets_dir():
                 'Place optional UI images here:\n'
                 '- bg.png   : window background (PNG)\n'
                 '- icon.png : window icon (PNG)\n'
+                '- monitor_target.png : image to detect (template matching)\n'
                 'Replace these with your own cute/moe assets.\n',
                 encoding='utf-8'
             )
@@ -167,6 +171,71 @@ def compute_action_total_ms(path: str) -> int:
         return max_ms
     except Exception:
         return 0
+
+# Simple monitor: template matching using OpenCV
+class MonitorThread(threading.Thread):
+    def __init__(self, target_path: str, timeout_s: float, interval_s: float, stop_callbacks=None, restart_callback=None, hit_callback=None):
+        super().__init__()
+        self.daemon = True
+        self.target_path = target_path
+        self.timeout_s = timeout_s
+        self.interval_s = interval_s
+        self.stop_callbacks = stop_callbacks or []
+        self.restart_callback = restart_callback
+        self._stop_ev = threading.Event()
+        self._tmpl = self._load_template(target_path)
+        self.hit_callback = hit_callback
+
+    def _load_template(self, path):
+        try:
+            img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+            return img
+        except Exception:
+            return None
+
+    def stop(self):
+        try:
+            self._stop_ev.set()
+        except Exception:
+            pass
+
+    def run(self):
+        if self._tmpl is None:
+            return
+        last_hit = time.monotonic()
+        while not self._stop_ev.is_set():
+            if (time.monotonic() - last_hit) >= self.timeout_s:
+                # timeout: stop current playback and request restart
+                for cb in self.stop_callbacks:
+                    try:
+                        cb()
+                    except Exception:
+                        pass
+                if callable(self.restart_callback):
+                    try:
+                        self.restart_callback()
+                    except Exception:
+                        pass
+                return
+            # take screenshot and match
+            try:
+                shot = pyautogui.screenshot()
+                shot = cv2.cvtColor(np.array(shot), cv2.COLOR_RGB2GRAY)
+                res = cv2.matchTemplate(shot, self._tmpl, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, _ = cv2.minMaxLoc(res)
+                if max_val >= 0.8:
+                    last_hit = time.monotonic()
+                    if callable(self.hit_callback):
+                        try:
+                            self.hit_callback()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            try:
+                self._stop_ev.wait(self.interval_s)
+            except Exception:
+                pass
 
 def save_settings():
     data = {}
@@ -340,6 +409,40 @@ def command_adapter(action):
                 total_ms = 0
             try:
                 start_monitor(execute_time_keyboard, total_ms/1000.0)
+            except Exception:
+                pass
+            # start monitor thread (template detection) if image exists
+            try:
+                global monitor_thread
+                monitor_img = os.path.join('assets', 'monitor_target.png')
+                if os.path.exists(monitor_img):
+                    # stop previous monitor if any
+                    try:
+                        if monitor_thread and monitor_thread.is_alive():
+                            monitor_thread.stop()
+                    except Exception:
+                        pass
+                    def _stop_current():
+                        try:
+                            ev_stop_execute_keyboard.set()
+                            ev_stop_execute_mouse.set()
+                        except Exception:
+                            pass
+                    def _restart_main():
+                        # restart primary action after stop
+                        try:
+                            root.after(0, lambda: command_adapter('execute'))
+                        except Exception:
+                            pass
+                    monitor_thread = MonitorThread(
+                        target_path=monitor_img,
+                        timeout_s=300,      # 5 minutes
+                        interval_s=3,       # check every 3s
+                        stop_callbacks=[_stop_current],
+                        restart_callback=_restart_main,
+                        hit_callback=on_monitor_hit
+                    )
+                    monitor_thread.start()
             except Exception:
                 pass
             # UI updates
@@ -879,7 +982,7 @@ if __name__ == '__main__':
     # Business theme: avoid decorative background image for a clean look
 
     root.title('Quick Macro')
-    root.geometry('720x430')
+    root.geometry('720x470')
     root.resizable(0,0)
 
     # title
@@ -902,7 +1005,7 @@ if __name__ == '__main__':
     replayCard = ttk.Frame(root, style='Card.TFrame', borderwidth=1, relief='solid')
     replayCard.place(x=360, y=70, width=330, height=250)
     monitorCard = ttk.Frame(root, style='Card.TFrame', borderwidth=1, relief='solid')
-    monitorCard.place(x=30, y=330, width=660, height=90)
+    monitorCard.place(x=30, y=330, width=660, height=110)
 
     # start recording
     startListenerBtn = ttk.Button(recordCard, text="Start recording (F10)", command=lambda: command_adapter('listen'), style='Center.TButton')
@@ -958,12 +1061,15 @@ if __name__ == '__main__':
     monitorTimeLabel.place(x=220, y=40, width=220, height=24)
     monitorTotalLabel = ttk.Label(monitorCard, text='Total loop time: 0.0s', style='CardLabel.TLabel')
     monitorTotalLabel.place(x=460, y=40, width=180, height=24)
+    dungeonTimeLabel = ttk.Label(monitorCard, text='Dungeon time: 0.0s', style='CardLabel.TLabel')
+    dungeonTimeLabel.place(x=12, y=70, width=250, height=24)
     # Monitor state & helpers
     monitor_total_loops = 0
     monitor_completed_loops = 0
     monitor_loop_start_ts = None
     monitor_timer_job = None
     monitor_total_time_s = 0.0
+    dungeon_start_ts = None
 
     def update_monitor_labels():
         try:
@@ -974,6 +1080,10 @@ if __name__ == '__main__':
                 elapsed = max(0.0, time.monotonic() - monitor_loop_start_ts)
             monitorTimeLabel['text'] = f"Current loop time: {elapsed:.1f}s"
             monitorTotalLabel['text'] = f"Total loop time: {monitor_total_time_s:.1f}s"
+            dungeon_elapsed = 0.0
+            if dungeon_start_ts is not None:
+                dungeon_elapsed = max(0.0, time.monotonic() - dungeon_start_ts)
+            dungeonTimeLabel['text'] = f"Dungeon time: {dungeon_elapsed:.1f}s"
         except Exception:
             pass
 
@@ -986,10 +1096,11 @@ if __name__ == '__main__':
             monitor_timer_job = None
 
     def start_monitor(total_loops: int, total_time_s: float = 0.0):
-        global monitor_total_loops, monitor_completed_loops, monitor_loop_start_ts, monitor_timer_job, monitor_total_time_s
+        global monitor_total_loops, monitor_completed_loops, monitor_loop_start_ts, monitor_timer_job, monitor_total_time_s, dungeon_start_ts
         monitor_total_loops = max(1, int(total_loops or 1))
         monitor_completed_loops = 0
         monitor_loop_start_ts = time.monotonic()
+        dungeon_start_ts = None
         try:
             monitor_total_time_s = max(0.0, float(total_time_s or 0.0))
         except Exception:
@@ -1025,11 +1136,21 @@ if __name__ == '__main__':
         monitor_loop_start_ts = time.monotonic()
         update_monitor_labels()
 
+    # Monitor thread handle
+    monitor_thread = None
+
+    def on_monitor_hit():
+        # mark dungeon start at first detection of target image
+        global dungeon_start_ts
+        dungeon_start_ts = time.monotonic()
+        update_monitor_labels()
+
     def reset_monitor():
-        global monitor_total_loops, monitor_completed_loops, monitor_loop_start_ts, monitor_timer_job
+        global monitor_total_loops, monitor_completed_loops, monitor_loop_start_ts, monitor_timer_job, dungeon_start_ts
         monitor_total_loops = 0
         monitor_completed_loops = 0
         monitor_loop_start_ts = None
+        dungeon_start_ts = None
         if monitor_timer_job:
             try:
                 root.after_cancel(monitor_timer_job)
@@ -1059,6 +1180,13 @@ if __name__ == '__main__':
             startListenerBtn.state(['disabled'])
             startExecuteBtn.state(['disabled'])
             startExecuteBtn['text'] = 'Replaying, "ESC/F11" to stop.'
+        # ensure monitor thread is stopped when exiting replay
+        if state == AppState.IDLE:
+            try:
+                if 'monitor_thread' in globals() and monitor_thread:
+                    monitor_thread.stop()
+            except Exception:
+                pass
         try:
             root.update_idletasks()
         except Exception:
