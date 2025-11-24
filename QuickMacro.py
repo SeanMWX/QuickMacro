@@ -267,6 +267,10 @@ def save_settings():
         data['game_mode_auto'] = bool(gameModeAutoVar.get())
     except Exception:
         pass
+    try:
+        data['monitor_timeout_ms'] = int(monitorTimeoutMs.get())
+    except Exception:
+        pass
     settings_mod.save_settings(data, SETTINGS_PATH)
 
 def apply_settings_to_ui(settings: dict):
@@ -288,6 +292,11 @@ def apply_settings_to_ui(settings: dict):
     try:
         if 'gameModeAutoVar' in globals() and 'game_mode_auto' in settings:
             gameModeAutoVar.set(bool(settings.get('game_mode_auto', True)))
+    except Exception:
+        pass
+    try:
+        if 'monitor_timeout_ms' in settings and 'monitorTimeoutMs' in globals():
+            monitorTimeoutMs.set(int(settings.get('monitor_timeout_ms', 240000)))
     except Exception:
         pass
 
@@ -413,7 +422,7 @@ def command_adapter(action):
                 pass
             # start monitor thread (template detection) if image exists
             try:
-                global monitor_thread
+                global monitor_thread, pending_main_action, restarting_flag
                 monitor_img = os.path.join('assets', 'monitor_target.png')
                 if os.path.exists(monitor_img):
                     # stop previous monitor if any
@@ -429,14 +438,46 @@ def command_adapter(action):
                         except Exception:
                             pass
                     def _restart_main():
-                        # restart primary action after stop
+                        # run restart.action once, then resume original main action
                         try:
-                            root.after(0, lambda: command_adapter('execute'))
+                            global can_start_listening, can_start_executing, pending_main_action, restarting_flag
+                            if restarting_flag:
+                                return
+                            restarting_flag = True
+                            pending_main_action = action_file_name
+                            actionFileVar.set('restart.action')
+
+                            def _replayer_busy():
+                                try:
+                                    return ('current_replayer' in globals() and current_replayer and
+                                            hasattr(current_replayer, '_runner') and current_replayer._runner is not None and
+                                            current_replayer._runner.is_alive())
+                                except Exception:
+                                    return False
+
+                            # wait until当前回放完全停止再启动restart，避免并行
+                            def _launch_restart():
+                                try:
+                                    if (not _replayer_busy()) and can_start_listening and can_start_executing:
+                                        command_adapter('execute')
+                                    else:
+                                        root.after(200, _launch_restart)
+                                except Exception:
+                                    pass
+
+                            # allow re-run even if previous run hasn't fully reset
+                            can_start_listening = True
+                            can_start_executing = True
+                            root.after(0, _launch_restart)
                         except Exception:
                             pass
+                    try:
+                        timeout_s = max(1.0, float(monitorTimeoutMs.get())/1000.0)
+                    except Exception:
+                        timeout_s = 240.0  # default 4 minutes
                     monitor_thread = MonitorThread(
                         target_path=monitor_img,
-                        timeout_s=300,      # 5 minutes
+                        timeout_s=timeout_s,
                         interval_s=3,       # check every 3s
                         stop_callbacks=[_stop_current],
                         restart_callback=_restart_main,
@@ -793,16 +834,8 @@ class ExecuteController(threading.Thread):
         global can_start_listening 
         global can_start_executing
 
-        # Listener to allow ESC to stop replaying
         def on_release(key):
-            global ev_stop_execute_keyboard
-            global ev_stop_execute_mouse
-            if key == keyboard.Key.esc:
-                try:
-                    ev_stop_execute_keyboard.set()
-                    ev_stop_execute_mouse.set()
-                except Exception:
-                    pass
+            return
 
         keyboardListener = keyboard.Listener(on_release=on_release)
         keyboardListener.start()
@@ -818,6 +851,37 @@ class ExecuteController(threading.Thread):
         can_start_listening = True
         can_start_executing = True
         update_ui_for_state(AppState.IDLE)
+        # If restart.action just finished, auto resume pending main action
+        try:
+            global restarting_flag, pending_main_action
+            base_name = os.path.basename(action_file_name) if 'action_file_name' in globals() else ''
+            if restarting_flag and pending_main_action and base_name.lower() == 'restart.action':
+                next_action = pending_main_action
+                pending_main_action = None
+                restarting_flag = False
+                # resolve path for main action and set globals/selection
+                try:
+                    main_path = next_action
+                    if not os.path.exists(main_path):
+                        candidate = os.path.join('actions', os.path.basename(next_action))
+                        if os.path.exists(candidate):
+                            main_path = candidate
+                    action_file_name = main_path
+                    actionFileVar.set(os.path.basename(main_path))
+                except Exception:
+                    pass
+                # ensure stop events are cleared for next run
+                try:
+                    ev_stop_execute_keyboard.clear()
+                    ev_stop_execute_mouse.clear()
+                except Exception:
+                    pass
+                can_start_listening = True
+                can_start_executing = True
+                # kick off main action on UI thread
+                root.after(0, lambda: command_adapter('execute'))
+        except Exception:
+            pass
         keyboardListener.stop()
 
 
@@ -1003,9 +1067,9 @@ if __name__ == '__main__':
     recordCard = ttk.Frame(root, style='Card.TFrame', borderwidth=1, relief='solid')
     recordCard.place(x=30, y=70, width=310, height=90)
     replayCard = ttk.Frame(root, style='Card.TFrame', borderwidth=1, relief='solid')
-    replayCard.place(x=360, y=70, width=330, height=250)
+    replayCard.place(x=360, y=70, width=330, height=280)
     monitorCard = ttk.Frame(root, style='Card.TFrame', borderwidth=1, relief='solid')
-    monitorCard.place(x=30, y=330, width=660, height=110)
+    monitorCard.place(x=30, y=360, width=660, height=110)
 
     # start recording
     startListenerBtn = ttk.Button(recordCard, text="Start recording (F10)", command=lambda: command_adapter('listen'), style='Center.TButton')
@@ -1138,6 +1202,8 @@ if __name__ == '__main__':
 
     # Monitor thread handle
     monitor_thread = None
+    pending_main_action = None
+    restarting_flag = False
 
     def on_monitor_hit():
         # mark dungeon start at first detection of target image
@@ -1179,7 +1245,7 @@ if __name__ == '__main__':
         elif state == AppState.REPLAYING:
             startListenerBtn.state(['disabled'])
             startExecuteBtn.state(['disabled'])
-            startExecuteBtn['text'] = 'Replaying, "ESC/F11" to stop.'
+            startExecuteBtn['text'] = 'Replaying, "F11" to stop.'
         # ensure monitor thread is stopped when exiting replay
         if state == AppState.IDLE:
             try:
@@ -1874,10 +1940,19 @@ if __name__ == '__main__':
         del_btn.pack(side='left', padx=6)
         # Removed Up/Down buttons in favor of drag-to-reorder
 
+    # Monitor timeout (ms)
+    global monitorTimeoutMs
+    monitorTimeoutMs = tkinter.IntVar()
+    monitorTimeoutMs.set(240000)
+    timeoutLabel = ttk.Label(replayCard, text='Restart time (ms)', style='CardLabel.TLabel')
+    timeoutLabel.place(x=15, y=205, width=150, height=26)
+    timeoutEntry = ttk.Entry(replayCard, textvariable=monitorTimeoutMs, style='Biz.TEntry')
+    timeoutEntry.place(x=170, y=205, width=120, height=26)
+
     editBtn = ttk.Button(replayCard, text='Edit', command=open_action_editor, style='Biz.TButton')
-    editBtn.place(x=120, y=205, width=80, height=28)
+    editBtn.place(x=120, y=235, width=80, height=28)
     openBtn = ttk.Button(replayCard, text='Folder', command=open_actions_folder, style='Biz.TButton')
-    openBtn.place(x=15, y=205, width=100, height=28)
+    openBtn.place(x=15, y=235, width=100, height=28)
     
     # Start hotkeys listener (F10/F11)
     HotkeyController().start()

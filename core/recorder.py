@@ -27,7 +27,7 @@ class KeyboardRecorder(threading.Thread):
 
     def run(self):
         def on_press(key):
-            if key in (keyboard.Key.esc, keyboard.Key.f10, keyboard.Key.f11):
+            if key in (keyboard.Key.f10, keyboard.Key.f11):
                 return
             t = int((time.monotonic() - self.start_mono) * 1000)
             try:
