@@ -461,19 +461,28 @@ def command_adapter(action):
                                     return False
 
                             # wait until当前回放完全停止再启动restart，避免并行
-                            def _launch_restart():
+                            def _launch_restart(deadline=None):
                                 try:
-                                    if (not _replayer_busy()) and can_start_listening and can_start_executing:
-                                        command_adapter('execute')
-                                    else:
-                                        root.after(200, _launch_restart)
+                                    now = time.monotonic()
+                                    if deadline is None:
+                                        deadline = now + 3.0  # 最多等 3 秒
+                                    if _replayer_busy() and now < deadline:
+                                        root.after(200, lambda: _launch_restart(deadline))
+                                        return
+                                    # allow re-run even if previous run hasn't fully reset
+                                    can_start_listening = True
+                                    can_start_executing = True
+                                    # 清理停止标记，避免下一轮立即退出
+                                    try:
+                                        ev_stop_execute_keyboard.clear()
+                                        ev_stop_execute_mouse.clear()
+                                    except Exception:
+                                        pass
+                                    command_adapter('execute')
                                 except Exception:
                                     pass
 
-                            # allow re-run even if previous run hasn't fully reset
-                            can_start_listening = True
-                            can_start_executing = True
-                            root.after(0, _launch_restart)
+                            root.after(200, _launch_restart)
                             # schedule hard switch back after 13s
                             if restart_back_job:
                                 try:
@@ -530,12 +539,14 @@ def command_adapter(action):
                                         root.after(0, lambda: command_adapter('execute'))
                                     except Exception:
                                         pass
-                                def _wait_until_stopped():
-                                    if not _replayer_busy():
+                                def _wait_until_stopped(deadline=None):
+                                    if deadline is None:
+                                        deadline = time.monotonic() + 3.0  # 最多等 3 秒
+                                    if (not _replayer_busy()) or time.monotonic() >= deadline:
                                         _resume_main()
                                     else:
                                         try:
-                                            root.after(100, _wait_until_stopped)
+                                            root.after(100, lambda: _wait_until_stopped(deadline))
                                         except Exception:
                                             pass
                                 _wait_until_stopped()
