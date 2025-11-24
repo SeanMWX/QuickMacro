@@ -34,6 +34,7 @@ class Replayer:
         self.loop_start_cb = loop_start_cb
         self._runner = None
         self._events = self._load_events(path)
+        self._pressed_vks = set()
 
     def _load_events(self, path):
         events = []
@@ -56,8 +57,10 @@ class Replayer:
             vk = int(d.get('vk') or 0)
             if d.get('op') == 'DOWN':
                 kb.press(KeyCode.from_vk(vk))
+                self._pressed_vks.add(vk)
             elif d.get('op') == 'UP':
                 kb.release(KeyCode.from_vk(vk))
+                self._pressed_vks.discard(vk)
         except Exception:
             pass
 
@@ -185,6 +188,16 @@ class Replayer:
             self.repeat_count -= 1
             if self.repeat_count <= 0:
                 break
+        # release any keys left pressed to avoid影响下一轮
+        try:
+            for vk in list(self._pressed_vks):
+                try:
+                    kb.release(KeyCode.from_vk(vk))
+                except Exception:
+                    pass
+            self._pressed_vks.clear()
+        except Exception:
+            pass
         try:
             self.stop_event_kb.set()
             self.stop_event_ms.set()

@@ -418,6 +418,11 @@ def command_adapter(action):
                 ev_stop_execute_mouse.clear()
             except Exception:
                 pass
+            # 确保上一轮残留按键/鼠标释放干净，避免后续按键被吞掉
+            try:
+                release_all_inputs()
+            except Exception:
+                pass
             total_ms = 0
             try:
                 total_ms = compute_action_total_ms(action_file_name)
