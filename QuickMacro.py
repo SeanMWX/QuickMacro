@@ -149,6 +149,25 @@ SETTINGS_PATH = 'settings.json'
 def load_settings():
     return settings_mod.load_settings(SETTINGS_PATH)
 
+def compute_action_total_ms(path: str) -> int:
+    try:
+        max_ms = 0
+        with open(path, 'r', encoding='utf-8') as f:
+            for line in f:
+                s = line.strip()
+                if not s or s.startswith('#'):
+                    continue
+                d = action_parse_line(s)
+                try:
+                    t_ms = int(d.get('ms') or 0)
+                except Exception:
+                    t_ms = 0
+                if t_ms > max_ms:
+                    max_ms = t_ms
+        return max_ms
+    except Exception:
+        return 0
+
 def save_settings():
     data = {}
     try:
@@ -170,6 +189,15 @@ def save_settings():
         data['game_mode_relative'] = bool(gameModeVar.get())
     except Exception:
         pass
+    # persist game mode gain/auto if available
+    try:
+        data['game_mode_gain'] = float(gameModeGainVar.get())
+    except Exception:
+        pass
+    try:
+        data['game_mode_auto'] = bool(gameModeAutoVar.get())
+    except Exception:
+        pass
     settings_mod.save_settings(data, SETTINGS_PATH)
 
 def apply_settings_to_ui(settings: dict):
@@ -181,6 +209,16 @@ def apply_settings_to_ui(settings: dict):
     try:
         if 'game_mode_relative' in settings and 'gameModeVar' in globals():
             gameModeVar.set(bool(settings.get('game_mode_relative', False)))
+    except Exception:
+        pass
+    try:
+        if 'gameModeGainVar' in globals() and 'game_mode_gain' in settings:
+            gameModeGainVar.set(float(settings.get('game_mode_gain', 1.0) or 1.0))
+    except Exception:
+        pass
+    try:
+        if 'gameModeAutoVar' in globals() and 'game_mode_auto' in settings:
+            gameModeAutoVar.set(bool(settings.get('game_mode_auto', True)))
     except Exception:
         pass
 
@@ -295,6 +333,15 @@ def command_adapter(action):
                 ev_stop_execute_mouse.clear()
             except Exception:
                 pass
+            total_ms = 0
+            try:
+                total_ms = compute_action_total_ms(action_file_name)
+            except Exception:
+                total_ms = 0
+            try:
+                start_monitor(execute_time_keyboard, total_ms/1000.0)
+            except Exception:
+                pass
             # UI updates
             update_ui_for_state(AppState.REPLAYING)
             # start replayer (keyboard + mouse) and controller (ESC monitor)
@@ -305,7 +352,34 @@ def command_adapter(action):
                     use_rel = bool(gameModeVar.get())
                 except Exception:
                     pass
-                current_replayer = Replayer(action_file_name, ev_stop_execute_keyboard, ev_stop_execute_mouse, ev_infinite_replay, execute_time_keyboard, use_rel)
+                # pass gain/auto settings (editable via settings.json)
+                try:
+                    rel_gain = float(gameModeGainVar.get())
+                except Exception:
+                    try:
+                        _s = load_settings(); rel_gain = float(_s.get('game_mode_gain', 1.0) or 1.0)
+                    except Exception:
+                        rel_gain = 1.0
+                try:
+                    rel_auto = bool(gameModeAutoVar.get())
+                except Exception:
+                    try:
+                        _s = load_settings(); rel_auto = bool(_s.get('game_mode_auto', True))
+                    except Exception:
+                        rel_auto = True
+                # progress callback updates monitor panel
+                def _on_progress(done, total):
+                    try:
+                        update_replay_progress(done, total)
+                    except Exception:
+                        pass
+                # loop_start_cb resets the loop timer to 0 for each new loop
+                def _on_loop_start(idx, total):
+                    try:
+                        update_replay_loop_start(idx, total)
+                    except Exception:
+                        pass
+                current_replayer = Replayer(action_file_name, ev_stop_execute_keyboard, ev_stop_execute_mouse, ev_infinite_replay, execute_time_keyboard, use_rel, rel_gain, rel_auto, _on_progress, _on_loop_start)
                 current_replayer.start()
             except Exception:
                 pass
@@ -692,6 +766,7 @@ class HotkeyController(threading.Thread):
                 try:
                     ev_stop_execute_keyboard.set()
                     ev_stop_execute_mouse.set()
+                    root.after(0, lambda: update_ui_for_state(AppState.IDLE))
                 except Exception:
                     pass
         
@@ -804,7 +879,7 @@ if __name__ == '__main__':
     # Business theme: avoid decorative background image for a clean look
 
     root.title('Quick Macro')
-    root.geometry('720x360')
+    root.geometry('720x430')
     root.resizable(0,0)
 
     # title
@@ -826,6 +901,8 @@ if __name__ == '__main__':
     recordCard.place(x=30, y=70, width=310, height=90)
     replayCard = ttk.Frame(root, style='Card.TFrame', borderwidth=1, relief='solid')
     replayCard.place(x=360, y=70, width=330, height=220)
+    monitorCard = ttk.Frame(root, style='Card.TFrame', borderwidth=1, relief='solid')
+    monitorCard.place(x=30, y=300, width=660, height=90)
 
     # start recording
     startListenerBtn = ttk.Button(recordCard, text="Start recording (F10)", command=lambda: command_adapter('listen'), style='Center.TButton')
@@ -859,8 +936,107 @@ if __name__ == '__main__':
     global gameModeVar
     gameModeVar = tkinter.BooleanVar()
     gameModeVar.set(False)
-    gameModeCheck = ttk.Checkbutton(replayCard, text='Game mode (relative mouse)', variable=gameModeVar, style='Card.TCheckbutton')
-    gameModeCheck.place(x=15, y=105, width=290, height=26)
+    gameModeCheck = ttk.Checkbutton(replayCard, text='Game mode', variable=gameModeVar, style='Card.TCheckbutton')
+    gameModeCheck.place(x=15, y=105, width=130, height=26)
+    # Game mode options: Gain and Auto detect
+    global gameModeGainVar, gameModeAutoVar
+    gameModeGainVar = tkinter.DoubleVar(); gameModeGainVar.set(1.0)
+    gameModeAutoVar = tkinter.BooleanVar(); gameModeAutoVar.set(True)
+    gainLabel = ttk.Label(replayCard, text='Gain', style='CardLabel.TLabel')
+    gainLabel.place(x=155, y=105, width=35, height=26)
+    gainEntry = ttk.Entry(replayCard, textvariable=gameModeGainVar, style='Biz.TEntry')
+    gainEntry.place(x=195, y=105, width=60, height=26)
+    autoCheck = ttk.Checkbutton(replayCard, text='Auto detect', variable=gameModeAutoVar, style='Card.TCheckbutton')
+    autoCheck.place(x=15, y=135, width=140, height=24)
+
+    # Monitor area (bottom)
+    monitorTitle = ttk.Label(monitorCard, text='Monitor', style='CardLabel.TLabel')
+    monitorTitle.place(x=12, y=8, width=80, height=24)
+    monitorLoopLabel = ttk.Label(monitorCard, text='Loops: 0/0', style='CardLabel.TLabel')
+    monitorLoopLabel.place(x=12, y=40, width=200, height=24)
+    monitorTimeLabel = ttk.Label(monitorCard, text='Current loop time: 0.0s', style='CardLabel.TLabel')
+    monitorTimeLabel.place(x=220, y=40, width=220, height=24)
+    monitorTotalLabel = ttk.Label(monitorCard, text='Total loop time: 0.0s', style='CardLabel.TLabel')
+    monitorTotalLabel.place(x=460, y=40, width=180, height=24)
+    # Monitor state & helpers
+    monitor_total_loops = 0
+    monitor_completed_loops = 0
+    monitor_loop_start_ts = None
+    monitor_timer_job = None
+    monitor_total_time_s = 0.0
+
+    def update_monitor_labels():
+        try:
+            loops_text = f"Loops: {monitor_completed_loops}/{monitor_total_loops}" if monitor_total_loops else "Loops: 0/0"
+            monitorLoopLabel['text'] = loops_text
+            elapsed = 0.0
+            if monitor_loop_start_ts is not None:
+                elapsed = max(0.0, time.monotonic() - monitor_loop_start_ts)
+            monitorTimeLabel['text'] = f"Current loop time: {elapsed:.1f}s"
+            monitorTotalLabel['text'] = f"Total loop time: {monitor_total_time_s:.1f}s"
+        except Exception:
+            pass
+
+    def _tick_monitor():
+        global monitor_timer_job
+        update_monitor_labels()
+        try:
+            monitor_timer_job = root.after(200, _tick_monitor)
+        except Exception:
+            monitor_timer_job = None
+
+    def start_monitor(total_loops: int, total_time_s: float = 0.0):
+        global monitor_total_loops, monitor_completed_loops, monitor_loop_start_ts, monitor_timer_job, monitor_total_time_s
+        monitor_total_loops = max(1, int(total_loops or 1))
+        monitor_completed_loops = 0
+        monitor_loop_start_ts = time.monotonic()
+        try:
+            monitor_total_time_s = max(0.0, float(total_time_s or 0.0))
+        except Exception:
+            monitor_total_time_s = 0.0
+        if monitor_timer_job:
+            try:
+                root.after_cancel(monitor_timer_job)
+            except Exception:
+                pass
+            monitor_timer_job = None
+        update_monitor_labels()
+        _tick_monitor()
+
+    def update_replay_progress(done: int, total: int):
+        global monitor_completed_loops, monitor_total_loops, monitor_loop_start_ts
+        try:
+            monitor_completed_loops = int(done or 0)
+        except Exception:
+            monitor_completed_loops = done
+        try:
+            if total:
+                monitor_total_loops = int(total)
+        except Exception:
+            pass
+        update_monitor_labels()
+
+    def update_replay_loop_start(loop_idx: int, total: int):
+        global monitor_loop_start_ts, monitor_total_loops
+        try:
+            monitor_total_loops = int(total or monitor_total_loops or 0)
+        except Exception:
+            pass
+        monitor_loop_start_ts = time.monotonic()
+        update_monitor_labels()
+
+    def reset_monitor():
+        global monitor_total_loops, monitor_completed_loops, monitor_loop_start_ts, monitor_timer_job
+        monitor_total_loops = 0
+        monitor_completed_loops = 0
+        monitor_loop_start_ts = None
+        if monitor_timer_job:
+            try:
+                root.after_cancel(monitor_timer_job)
+            except Exception:
+                pass
+            monitor_timer_job = None
+        update_monitor_labels()
 
     # UI state helper
     class AppState:
@@ -870,18 +1046,23 @@ if __name__ == '__main__':
 
     def update_ui_for_state(state: str):
         if state == AppState.IDLE:
-            startListenerBtn['state'] = 'normal'
-            startExecuteBtn['state'] = 'normal'
+            startListenerBtn.state(['!disabled'])
+            startExecuteBtn.state(['!disabled'])
             startListenerBtn['text'] = 'Start recording (F10)'
             startExecuteBtn['text'] = 'Start replaying (F11)'
+            reset_monitor()
         elif state == AppState.RECORDING:
-            startListenerBtn['state'] = 'disabled'
-            startExecuteBtn['state'] = 'disabled'
+            startListenerBtn.state(['disabled'])
+            startExecuteBtn.state(['disabled'])
             startListenerBtn['text'] = 'Recording, "F10" to stop.'
         elif state == AppState.REPLAYING:
-            startListenerBtn['state'] = 'disabled'
-            startExecuteBtn['state'] = 'disabled'
+            startListenerBtn.state(['disabled'])
+            startExecuteBtn.state(['disabled'])
             startExecuteBtn['text'] = 'Replaying, "ESC/F11" to stop.'
+        try:
+            root.update_idletasks()
+        except Exception:
+            pass
 
     actionFileVar = tkinter.StringVar()
     files = list_action_files()
@@ -926,6 +1107,33 @@ if __name__ == '__main__':
     except Exception:
         try:
             gameModeVar.trace('w', lambda *_: save_settings())
+        except Exception:
+            pass
+    # Persist Auto toggle changes
+    try:
+        gameModeAutoVar.trace_add('write', lambda *_: save_settings())
+    except Exception:
+        try:
+            gameModeAutoVar.trace('w', lambda *_: save_settings())
+        except Exception:
+            pass
+    # Gain: validate and persist on change
+    def _commit_gain(*_):
+        try:
+            val = float(gameModeGainVar.get())
+            if not (0.01 <= val <= 10.0):
+                gameModeGainVar.set(1.0)
+        except Exception:
+            gameModeGainVar.set(1.0)
+        try:
+            save_settings()
+        except Exception:
+            pass
+    try:
+        gameModeGainVar.trace_add('write', _commit_gain)
+    except Exception:
+        try:
+            gameModeGainVar.trace('w', _commit_gain)
         except Exception:
             pass
     
