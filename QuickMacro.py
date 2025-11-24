@@ -397,6 +397,12 @@ def command_adapter(action):
             else:
                 # use selected file (prefer actions/, fallback root)
                 action_file_name = sel_path if os.path.exists(sel_path) else selected
+            # 每次启动常规脚本时重置重启标记，避免上次流程遗留导致后续超时不触发
+            try:
+                if os.path.basename(action_file_name).lower() != 'restart.action':
+                    restarting_flag = False
+            except Exception:
+                pass
             # init counters and flags
             try:
                 if 'infiniteRepeatVar' in globals() and bool(infiniteRepeatVar.get()):
@@ -423,7 +429,7 @@ def command_adapter(action):
                 pass
             # start monitor thread (template detection) if image exists
             try:
-                global monitor_thread, pending_main_action, pending_main_playcount, restarting_flag
+                global monitor_thread, pending_main_action, pending_main_playcount
                 monitor_img = os.path.join('assets', 'monitor_target.png')
                 if os.path.exists(monitor_img):
                     # stop previous monitor if any
@@ -461,14 +467,8 @@ def command_adapter(action):
                                     return False
 
                             # wait until当前回放完全停止再启动restart，避免并行
-                            def _launch_restart(deadline=None):
+                            def _launch_restart():
                                 try:
-                                    now = time.monotonic()
-                                    if deadline is None:
-                                        deadline = now + 3.0  # 最多等 3 秒
-                                    if _replayer_busy() and now < deadline:
-                                        root.after(200, lambda: _launch_restart(deadline))
-                                        return
                                     # allow re-run even if previous run hasn't fully reset
                                     can_start_listening = True
                                     can_start_executing = True
@@ -482,7 +482,8 @@ def command_adapter(action):
                                 except Exception:
                                     pass
 
-                            root.after(200, _launch_restart)
+                            # 立即调度执行 restart.action，降低错过的概率
+                            root.after(100, _launch_restart)
                             # schedule hard switch back after 13s
                             if restart_back_job:
                                 try:
