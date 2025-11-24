@@ -900,9 +900,9 @@ if __name__ == '__main__':
     recordCard = ttk.Frame(root, style='Card.TFrame', borderwidth=1, relief='solid')
     recordCard.place(x=30, y=70, width=310, height=90)
     replayCard = ttk.Frame(root, style='Card.TFrame', borderwidth=1, relief='solid')
-    replayCard.place(x=360, y=70, width=330, height=220)
+    replayCard.place(x=360, y=70, width=330, height=250)
     monitorCard = ttk.Frame(root, style='Card.TFrame', borderwidth=1, relief='solid')
-    monitorCard.place(x=30, y=300, width=660, height=90)
+    monitorCard.place(x=30, y=330, width=660, height=90)
 
     # start recording
     startListenerBtn = ttk.Button(recordCard, text="Start recording (F10)", command=lambda: command_adapter('listen'), style='Center.TButton')
@@ -1070,9 +1070,9 @@ if __name__ == '__main__':
 
     # Action file controls inside the Replay card
     actionFileLabel = ttk.Label(replayCard, text='Action file', style='CardLabel.TLabel')
-    actionFileLabel.place(x=15, y=140, width=100, height=26)
+    actionFileLabel.place(x=15, y=170, width=100, height=26)
     actionFileSelect = ttk.Combobox(replayCard, textvariable=actionFileVar, values=files if files else [], state='readonly', style='Biz.TCombobox')
-    actionFileSelect.place(x=120, y=140, width=190, height=28)
+    actionFileSelect.place(x=120, y=170, width=190, height=28)
 
     # Refresh button removed; list auto-updates after recording
     
@@ -1747,9 +1747,9 @@ if __name__ == '__main__':
         # Removed Up/Down buttons in favor of drag-to-reorder
 
     editBtn = ttk.Button(replayCard, text='Edit', command=open_action_editor, style='Biz.TButton')
-    editBtn.place(x=120, y=175, width=80, height=28)
+    editBtn.place(x=120, y=205, width=80, height=28)
     openBtn = ttk.Button(replayCard, text='Folder', command=open_actions_folder, style='Biz.TButton')
-    openBtn.place(x=15, y=175, width=100, height=28)
+    openBtn.place(x=15, y=205, width=100, height=28)
     
     # Start hotkeys listener (F10/F11)
     HotkeyController().start()
