@@ -22,5 +22,5 @@ def add_offset(src_path: str, dst_path: str, offset_ms: int):
 
 if __name__ == '__main__':
     # 示例：把 20251124-154505.action 的时间加 5000ms，写到 new.action
-    add_offset('actions/20251124-153808.action', 'actions/20251124-153808-offset.action', -13000)
+    add_offset('actions/【委托密函魔之楔驱离40（1倍）】挂机-水母西比.action', 'actions/【委托密函魔之楔驱离40（1倍）】挂机-水母西比-offset.action', 71840-65577)
     print('done')
