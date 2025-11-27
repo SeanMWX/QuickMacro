@@ -453,6 +453,33 @@ def run_app(qm):
     actionFileLabel = ttk.Label(replayCard, text='Action file', style='CardLabel.TLabel')
     actionFileLabel.place(x=15, y=170, width=100, height=26)
     actionFileSelect = ttk.Combobox(replayCard, textvariable=actionFileVar, values=files if files else [], state='readonly', style='Biz.TCombobox')
+
+    # expose key UI refs back to qm module via UIRefs container
+    qm.ui_refs = UIRefs(
+        root=root,
+        actionFileVar=actionFileVar,
+        actionFileSelect=actionFileSelect,
+        startExecuteBtn=startExecuteBtn,
+        startListenerBtn=startListenerBtn,
+        playCount=playCount,
+        infiniteRepeatVar=infiniteRepeatVar,
+        gameModeVar=gameModeVar,
+        gameModeGainVar=gameModeGainVar,
+        gameModeAutoVar=gameModeAutoVar,
+        log_event=log_event,
+        update_ui_for_state=update_ui_for_state,
+        begin_run=begin_run,
+        mark_interrupted=mark_interrupted,
+        mark_finished=mark_finished,
+        recording_controller=recording_controller,
+        playback_controller=playback_controller,
+        listen_controller=listen_controller,
+        execute_controller=execute_controller,
+    )
+    listen_controller.ui_refs = qm.ui_refs
+    execute_controller.ui_refs = qm.ui_refs
+
+
     actionFileSelect.place(x=120, y=170, width=190, height=28)
     
     # Refresh button removed; list auto-updates after recording
@@ -1145,31 +1172,6 @@ def run_app(qm):
     editBtn.place(x=120, y=235, width=80, height=28)
     openBtn = ttk.Button(replayCard, text='Folder', command=open_actions_folder, style='Biz.TButton')
     openBtn.place(x=15, y=235, width=100, height=28)
-
-    # expose key UI refs back to qm module via UIRefs container
-    qm.ui_refs = UIRefs(
-        root=root,
-        actionFileVar=actionFileVar,
-        actionFileSelect=actionFileSelect,
-        startExecuteBtn=startExecuteBtn,
-        startListenerBtn=startListenerBtn,
-        playCount=playCount,
-        infiniteRepeatVar=infiniteRepeatVar,
-        gameModeVar=gameModeVar,
-        gameModeGainVar=gameModeGainVar,
-        gameModeAutoVar=gameModeAutoVar,
-        log_event=log_event,
-        update_ui_for_state=update_ui_for_state,
-        begin_run=begin_run,
-        mark_interrupted=mark_interrupted,
-        mark_finished=mark_finished,
-        recording_controller=recording_controller,
-        playback_controller=playback_controller,
-        listen_controller=listen_controller,
-        execute_controller=execute_controller,
-    )
-    listen_controller.ui_refs = qm.ui_refs
-    execute_controller.ui_refs = qm.ui_refs
 
     # Start hotkeys listener (F10/F11)
     HotkeyController(state, root, lambda: command_adapter('listen'), lambda: command_adapter('execute')).start()
