@@ -232,6 +232,19 @@ def run_app(qm):
     state.current_run_action = ''
     state.current_run_interrupted = False
     state.skip_run_increment = False
+    def _get_replay_params():
+        try:
+            gain_val = float(gameModeGainVar.get())
+        except Exception:
+            gain_val = 1.0
+        return {
+            'action': actionFileVar.get().strip(),
+            'repeat': playCount.get(),
+            'infinite': bool(infiniteRepeatVar.get()),
+            'use_rel': bool(gameModeVar.get()),
+            'rel_gain': gain_val,
+            'rel_auto': bool(gameModeAutoVar.get())
+        }
     def _resolve_action_path(name: str) -> str:
         if not name:
             return ''
@@ -478,6 +491,27 @@ def run_app(qm):
     )
     listen_controller.ui_refs = qm.ui_refs
     execute_controller.ui_refs = qm.ui_refs
+
+    app_service = qm.AppService(
+        state=state,
+        recording_controller=recording_controller,
+        playback_controller=playback_controller,
+        listen_controller=listen_controller,
+        execute_controller=execute_controller,
+        start_monitor=start_monitor,
+        compute_action_total_ms=compute_action_total_ms,
+        get_restart_timeout_ms=get_restart_timeout_ms,
+        release_all_inputs=release_all_inputs,
+        hooks={
+            'log_event': log_event,
+            'update_ui_for_state': update_ui_for_state,
+            'begin_run': begin_run,
+            'mark_interrupted': mark_interrupted,
+            'mark_finished': mark_finished,
+        },
+        replay_params_provider=_get_replay_params
+    )
+    qm.app_service = app_service
 
 
     actionFileSelect.place(x=120, y=170, width=190, height=28)

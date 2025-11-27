@@ -69,6 +69,7 @@ class AppState:
 
 state = AppState()
 ui_refs = None
+app_service = None
 
 # UI references container
 @dataclass
@@ -101,6 +102,234 @@ class UiState:
     RECORDING = 'recording'
     REPLAYING = 'replaying'
 
+######################################################################
+# Service layer
+######################################################################
+class AppService:
+    def __init__(self, state: AppState, recording_controller, playback_controller, listen_controller, execute_controller, *, start_monitor, compute_action_total_ms, get_restart_timeout_ms, release_all_inputs, hooks: dict, replay_params_provider):
+        self.state = state
+        self.recording_controller = recording_controller
+        self.playback_controller = playback_controller
+        self.listen_controller = listen_controller
+        self.execute_controller = execute_controller
+        self.start_monitor_fn = start_monitor
+        self.compute_action_total_ms = compute_action_total_ms
+        self.get_restart_timeout_ms = get_restart_timeout_ms
+        self.release_all_inputs = release_all_inputs
+        self.hooks = hooks or {}
+        self.replay_params_provider = replay_params_provider
+        self.last_replay_params = None
+
+    def _log(self, msg: str):
+        try:
+            cb = self.hooks.get('log_event')
+            if cb:
+                cb(msg)
+        except Exception:
+            pass
+
+    def _update_state(self, ui_state: str):
+        try:
+            cb = self.hooks.get('update_ui_for_state')
+            if cb:
+                cb(ui_state)
+        except Exception:
+            pass
+
+    def _begin_run(self, path: str, resume: bool):
+        try:
+            cb = self.hooks.get('begin_run')
+            if cb:
+                cb(path, resume=resume)
+        except Exception:
+            pass
+
+    def _resolve_action_path(self, name: str) -> str:
+        if not name:
+            return ''
+        sel_path = os.path.join('actions', name)
+        return sel_path if os.path.exists(sel_path) else name
+
+    def start_record(self):
+        if not (self.state.can_start_listening and self.state.can_start_executing):
+            return
+        if self.recording_controller:
+            self.recording_controller.start()
+        try:
+            if self.listen_controller and self.listen_controller.is_alive():
+                pass
+            else:
+                self.listen_controller = ListenController(self.state, ui_refs)
+                self.listen_controller.start()
+        except Exception:
+            pass
+
+    def stop_record(self):
+        if self.recording_controller:
+            try:
+                self.recording_controller.stop()
+            except Exception:
+                pass
+
+    def start_replay(self, params: dict = None, *, resume: bool = False):
+        if not (self.state.can_start_listening and self.state.can_start_executing):
+            return
+        if params is None and self.replay_params_provider:
+            params = self.replay_params_provider()
+        if not params:
+            return
+        self.last_replay_params = params
+        selected = (params.get('action') or '').strip()
+        sel_path = self._resolve_action_path(selected)
+        if not selected:
+            self._log('Please select an action file.')
+            return
+        self.state.action_file_name = sel_path
+        try:
+            self.state.restart_timeout_ms = self.get_restart_timeout_ms(sel_path)
+        except Exception:
+            self.state.restart_timeout_ms = 3600000
+        if not self.state.skip_run_increment:
+            self._begin_run(self.state.action_file_name, resume=False)
+        else:
+            self._begin_run(self.state.action_file_name, resume=True)
+            self.state.skip_run_increment = False
+        try:
+            if os.path.basename(self.state.action_file_name).lower() != 'restart.action':
+                self.state.restarting_flag = False
+        except Exception:
+            pass
+        try:
+            if params.get('infinite'):
+                self.state.ev_infinite_replay.set()
+            else:
+                self.state.ev_infinite_replay.clear()
+        except Exception:
+            pass
+        try:
+            repeat = int(params.get('repeat') or 1)
+        except Exception:
+            repeat = 1
+        self.state.execute_time_keyboard = repeat
+        self.state.execute_time_mouse = repeat
+        try:
+            self.state.ev_stop_execute_keyboard.clear()
+            self.state.ev_stop_execute_mouse.clear()
+        except Exception:
+            pass
+        try:
+            self.release_all_inputs()
+        except Exception:
+            pass
+        total_ms = 0
+        try:
+            total_ms = self.compute_action_total_ms(self.state.action_file_name)
+        except Exception:
+            total_ms = 0
+        try:
+            self.start_monitor_fn(self.state.execute_time_keyboard, total_ms/1000.0)
+        except Exception:
+            pass
+        try:
+            monitor_img = os.path.join('assets', 'monitor_target.png')
+            if os.path.exists(monitor_img):
+                try:
+                    if self.state.monitor_thread and self.state.monitor_thread.is_alive():
+                        self.state.monitor_thread.stop()
+                except Exception:
+                    pass
+                def _stop_current():
+                    try:
+                        self.state.ev_stop_execute_keyboard.set()
+                        self.state.ev_stop_execute_mouse.set()
+                    except Exception:
+                        pass
+                def _restart_main():
+                    try:
+                        if self.state.restarting_flag or self.state.restart_running:
+                            return
+                        self.state.restarting_flag = True
+                        self.state.pending_main_action = self.state.action_file_name
+                        self.state.pending_main_playcount = repeat
+                        self.state.ev_stop_execute_keyboard.set()
+                        self.state.ev_stop_execute_mouse.set()
+                    except Exception:
+                        pass
+                try:
+                    timeout_s = max(1.0, float(self.state.restart_timeout_ms)/1000.0)
+                except Exception:
+                    timeout_s = 3600.0
+                self.state.monitor_thread = MonitorThread(
+                    target_path=monitor_img,
+                    timeout_s=timeout_s,
+                    interval_s=3,
+                    stop_callbacks=[_stop_current],
+                    restart_callback=_restart_main,
+                    hit_callback=on_monitor_hit
+                )
+                self.state.monitor_thread.start()
+        except Exception:
+            pass
+        self._update_state(UiState.REPLAYING)
+        try:
+            use_rel = bool(params.get('use_rel'))
+        except Exception:
+            use_rel = False
+        try:
+            rel_gain = float(params.get('rel_gain', 1.0) or 1.0)
+        except Exception:
+            rel_gain = 1.0
+        try:
+            rel_auto = bool(params.get('rel_auto', True))
+        except Exception:
+            rel_auto = True
+        if self.playback_controller:
+            try:
+                self.playback_controller.start(
+                    self.state.action_file_name,
+                    repeat,
+                    infinite=bool(params.get('infinite')),
+                    use_rel=use_rel,
+                    rel_gain=rel_gain,
+                    rel_auto=rel_auto,
+                    total_ms=total_ms
+                )
+            except Exception:
+                pass
+        try:
+            if self.execute_controller and self.execute_controller.is_alive():
+                pass
+            else:
+                self.execute_controller = ExecuteController(self.state, ui_refs, command_adapter, self.release_all_inputs)
+                self.execute_controller.start()
+        except Exception:
+            pass
+        self.state.can_start_listening = False
+        self.state.can_start_executing = False
+
+    def stop_replay(self):
+        try:
+            self.state.ev_stop_execute_keyboard.set()
+            self.state.ev_stop_execute_mouse.set()
+        except Exception:
+            pass
+        self.state.can_start_listening = True
+        self.state.can_start_executing = True
+        self._update_state(UiState.IDLE)
+        self._log("Replay stop requested")
+
+    def toggle_record(self):
+        if self.state.can_start_listening and self.state.can_start_executing:
+            self.start_record()
+        else:
+            self.stop_record()
+
+    def toggle_replay(self):
+        if self.state.can_start_listening and self.state.can_start_executing:
+            params = self.replay_params_provider() if self.replay_params_provider else None
+            self.start_replay(params)
+        else:
+            self.stop_replay()
 ######################################################################
 # Helpers
 ######################################################################
@@ -381,195 +610,13 @@ def mouse_action_template():
 # Receive Command
 ######################################################################
 def command_adapter(action):
-    # command list
-    custom_thread_list = []
-    print(state.can_start_listening)
-    
-    if ui_refs is None:
+    global app_service
+    if app_service is None:
         return
-    
-    if state.can_start_listening and state.can_start_executing:
-        if action == 'listen':
-            if ui_refs.recording_controller:
-                ui_refs.recording_controller.start()
-            # start listen controller to capture ESC during recording
-            try:
-                if ui_refs.listen_controller and ui_refs.listen_controller.is_alive():
-                    pass
-                else:
-                    ui_refs.listen_controller = ListenController(state, ui_refs)
-                    ui_refs.listen_controller.start()
-            except Exception:
-                pass
-
-        elif action == 'execute':
-            # set the selected action file for replay
-            selected = ui_refs.actionFileVar.get().strip()
-            # resolve to actions/ if present
-            sel_path = os.path.join('actions', selected) if selected else ''
-            if not selected:
-                ui_refs.startExecuteBtn['text'] = 'Select a .action file'
-                return
-            else:
-                # use selected file (prefer actions/, fallback root)
-                state.action_file_name = sel_path if os.path.exists(sel_path) else selected
-            try:
-                state.restart_timeout_ms = get_restart_timeout_ms(state.action_file_name)
-            except Exception:
-                state.restart_timeout_ms = 3600000
-            # bookkeeping for run index
-            if not state.skip_run_increment:
-                ui_refs.begin_run(state.action_file_name, resume=False)
-            else:
-                ui_refs.begin_run(state.action_file_name, resume=True)
-                state.skip_run_increment = False
-            # 每次启动常规脚本时重置重启标记，避免上次流程遗留导致后续超时不触发
-            try:
-                if os.path.basename(state.action_file_name).lower() != 'restart.action':
-                    state.restarting_flag = False
-            except Exception:
-                pass
-            # init counters and flags
-            try:
-                if ui_refs and bool(ui_refs.infiniteRepeatVar.get()):
-                    state.ev_infinite_replay.set()
-                else:
-                    state.ev_infinite_replay.clear()
-            except Exception:
-                pass
-            state.execute_time_keyboard = ui_refs.playCount.get()
-            state.execute_time_mouse = ui_refs.playCount.get()
-            try:
-                state.ev_stop_execute_keyboard.clear()
-                state.ev_stop_execute_mouse.clear()
-            except Exception:
-                pass
-            # 确保上一轮残留按键/鼠标释放干净，避免后续按键被吞掉
-            try:
-                release_all_inputs()
-            except Exception:
-                pass
-            total_ms = 0
-            try:
-                total_ms = compute_action_total_ms(state.action_file_name)
-            except Exception:
-                total_ms = 0
-            try:
-                start_monitor(state.execute_time_keyboard, total_ms/1000.0)
-            except Exception:
-                pass
-            # start monitor thread (template detection) if image exists
-            try:
-                monitor_img = os.path.join('assets', 'monitor_target.png')
-                if os.path.exists(monitor_img):
-                    # stop previous monitor if any
-                    try:
-                        if state.monitor_thread and state.monitor_thread.is_alive():
-                            state.monitor_thread.stop()
-                    except Exception:
-                        pass
-                    def _stop_current():
-                        try:
-                            state.ev_stop_execute_keyboard.set()
-                            state.ev_stop_execute_mouse.set()
-                        except Exception:
-                            pass
-                    def _restart_main():
-                        # run restart.action once, then resume original main action
-                        try:
-                            if state.restarting_flag or state.restart_running:
-                                return
-                            state.restarting_flag = True
-                            state.pending_main_action = state.action_file_name
-                            try:
-                                state.pending_main_playcount = ui_refs.playCount.get()
-                            except Exception:
-                                state.pending_main_playcount = None
-                            # stop current run; ExecuteController will start restart.action next
-                            state.ev_stop_execute_keyboard.set()
-                            state.ev_stop_execute_mouse.set()
-                        except Exception:
-                            pass
-                    try:
-                        timeout_s = max(1.0, float(state.restart_timeout_ms)/1000.0)
-                    except Exception:
-                        timeout_s = 3600.0  # default 1 hour
-                    state.monitor_thread = MonitorThread(
-                        target_path=monitor_img,
-                        timeout_s=timeout_s,
-                        interval_s=3,       # check every 3s
-                        stop_callbacks=[_stop_current],
-                        restart_callback=_restart_main,
-                        hit_callback=on_monitor_hit
-                    )
-                    state.monitor_thread.start()
-
-                    # restart fallback handled inside monitor timeout flow
-            except Exception:
-                pass
-            # UI updates
-            ui_refs.update_ui_for_state(UiState.REPLAYING)
-            # start replayer (keyboard + mouse) and controller (ESC monitor)
-            try:
-                use_rel = False
-                try:
-                    use_rel = bool(ui_refs.gameModeVar.get())
-                except Exception:
-                    pass
-                try:
-                    rel_gain = float(ui_refs.gameModeGainVar.get())
-                except Exception:
-                    try:
-                        _s = load_settings(); rel_gain = float(_s.get('game_mode_gain', 1.0) or 1.0)
-                    except Exception:
-                        rel_gain = 1.0
-                try:
-                    rel_auto = bool(ui_refs.gameModeAutoVar.get())
-                except Exception:
-                    try:
-                        _s = load_settings(); rel_auto = bool(_s.get('game_mode_auto', True))
-                    except Exception:
-                        rel_auto = True
-                if ui_refs.playback_controller:
-                    ui_refs.playback_controller.start(
-                        state.action_file_name,
-                        state.execute_time_keyboard,
-                        infinite=bool(ui_refs.infiniteRepeatVar.get()) if ui_refs else False,
-                        use_rel=use_rel,
-                        rel_gain=rel_gain,
-                        rel_auto=rel_auto,
-                        total_ms=total_ms
-                    )
-            except Exception:
-                pass
-            try:
-                if ui_refs.execute_controller and ui_refs.execute_controller.is_alive():
-                    pass
-                else:
-                    ui_refs.execute_controller = ExecuteController(state, ui_refs, command_adapter, release_all_inputs)
-                    ui_refs.execute_controller.start()
-            except Exception:
-                pass
-            state.can_start_listening = False
-            state.can_start_executing = False
-    else:
-        # ???F11 ???????????????
-        if action == 'execute':
-            try:
-                state.ev_stop_execute_keyboard.set()
-                state.ev_stop_execute_mouse.set()
-            except Exception:
-                pass
-            state.can_start_listening = True
-            state.can_start_executing = True
-            ui_refs.update_ui_for_state(UiState.IDLE)
-            ui_refs.log_event("Replay stop requested")
-        else:
-            try:
-                ui_refs.log_event(f"Skip action '{action}': busy (state.can_start_listening={state.can_start_listening}, state.can_start_executing={state.can_start_executing})")
-            except Exception:
-                pass
-            pass
+    if action == 'listen':
+        app_service.toggle_record()
+    elif action == 'execute':
+        app_service.toggle_replay()
 
 ######################################################################
 # Update UI
