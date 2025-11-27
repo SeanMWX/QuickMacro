@@ -212,7 +212,7 @@ def run_app(qm):
     monitorTotalLabel.place(x=460, y=40, width=180, height=24)
     dungeonTimeLabel = ttk.Label(monitorCard, text='Dungeon time: 0.0s', style='CardLabel.TLabel')
     dungeonTimeLabel.place(x=12, y=70, width=250, height=24)
-    restartTimeLabel = ttk.Label(monitorCard, text='Restart time: 3600000ms', style='CardLabel.TLabel')
+    restartTimeLabel = ttk.Label(monitorCard, text='Restart time: 3600.0s', style='CardLabel.TLabel')
     restartTimeLabel.place(x=220, y=70, width=260, height=24)
     # Monitor state & helpers
     state.monitor_total_loops = 0
@@ -299,7 +299,7 @@ def run_app(qm):
                 dungeon_elapsed = max(0.0, time.monotonic() - state.dungeon_start_ts)
             dungeonTimeLabel['text'] = f"Dungeon time: {dungeon_elapsed:.1f}s"
             restart_ms = getattr(state, 'restart_timeout_ms', 0) or 0
-            restartTimeLabel['text'] = f"Restart time: {int(restart_ms)}ms"
+            restartTimeLabel['text'] = f"Restart time: {restart_ms/1000.0:.1f}s"
         except Exception:
             pass
 
