@@ -54,6 +54,7 @@ class AppState:
     monitor_loop_start_ts: float = None
     monitor_total_time_s: float = 0.0
     dungeon_start_ts: float = None
+    restart_timeout_ms: int = 3600000
     pending_main_action: str = None
     pending_main_playcount: int = None
     restarting_flag: bool = False
@@ -82,7 +83,6 @@ class UIRefs:
     gameModeVar: object
     gameModeGainVar: object
     gameModeAutoVar: object
-    monitorTimeoutMs: object
     log_event: object
     update_ui_for_state: object
     begin_run: object
@@ -216,7 +216,7 @@ def load_settings():
 
 def compute_action_total_ms(path: str) -> int:
     try:
-        max_ms = 0
+        total_ms = 0
         with open(path, 'r', encoding='utf-8') as f:
             for line in f:
                 s = line.strip()
@@ -224,14 +224,51 @@ def compute_action_total_ms(path: str) -> int:
                     continue
                 d = action_parse_line(s)
                 try:
-                    t_ms = int(d.get('ms') or 0)
+                    t_ms = int(float(d.get('ms') or 0))
                 except Exception:
                     t_ms = 0
-                if t_ms > max_ms:
-                    max_ms = t_ms
-        return max_ms
+                if t_ms > 0:
+                    total_ms = max(total_ms, t_ms)
+        return total_ms
     except Exception:
         return 0
+
+def _get_default_restart_ms():
+    try:
+        cfg = load_settings() or {}
+        val = int(float(cfg.get('default_restart_ms', 3600000)))
+        return max(1000, val)
+    except Exception:
+        return 3600000
+
+def get_restart_timeout_ms(path: str) -> int:
+    default_ms = _get_default_restart_ms()
+    if not path:
+        return default_ms
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+    except Exception:
+        return default_ms
+    restart_ms = None
+    for line in lines:
+        s = line.strip()
+        if not s.startswith('META RESTART'):
+            continue
+        parts = s.split()
+        if len(parts) >= 3:
+            try:
+                restart_ms = int(float(parts[2]))
+            except Exception:
+                restart_ms = None
+        break
+    if restart_ms is None:
+        restart_ms = default_ms
+    try:
+        restart_ms = int(restart_ms)
+    except Exception:
+        restart_ms = default_ms
+    return max(1000, restart_ms)
 
 # Simple monitor: template matching using OpenCV
 ######################################################################
@@ -269,10 +306,6 @@ def save_settings():
         data['game_mode_auto'] = bool(ui_refs.gameModeAutoVar.get())
     except Exception:
         pass
-    try:
-        data['monitor_timeout_ms'] = int(ui_refs.monitorTimeoutMs.get())
-    except Exception:
-        pass
     settings_mod.save_settings(data, SETTINGS_PATH)
 
 def apply_settings_to_ui(settings: dict):
@@ -298,12 +331,6 @@ def apply_settings_to_ui(settings: dict):
             ui_refs.gameModeAutoVar.set(bool(settings.get('game_mode_auto', True)))
     except Exception:
         pass
-    try:
-        if 'monitor_timeout_ms' in settings and 'ui_refs.monitorTimeoutMs' in globals():
-            ui_refs.monitorTimeoutMs.set(int(settings.get('monitor_timeout_ms', 240000)))
-    except Exception:
-        pass
-
 # Sync the Combobox to point at the current recording file
 def select_current_action_in_dropdown():
     if ui_refs is None:
@@ -386,6 +413,10 @@ def command_adapter(action):
             else:
                 # use selected file (prefer actions/, fallback root)
                 state.action_file_name = sel_path if os.path.exists(sel_path) else selected
+            try:
+                state.restart_timeout_ms = get_restart_timeout_ms(state.action_file_name)
+            except Exception:
+                state.restart_timeout_ms = 3600000
             # bookkeeping for run index
             if not state.skip_run_increment:
                 ui_refs.begin_run(state.action_file_name, resume=False)
@@ -460,9 +491,9 @@ def command_adapter(action):
                         except Exception:
                             pass
                     try:
-                        timeout_s = max(1.0, float(ui_refs.monitorTimeoutMs.get())/1000.0)
+                        timeout_s = max(1.0, float(state.restart_timeout_ms)/1000.0)
                     except Exception:
-                        timeout_s = 240.0  # default 4 minutes
+                        timeout_s = 3600.0  # default 1 hour
                     state.monitor_thread = MonitorThread(
                         target_path=monitor_img,
                         timeout_s=timeout_s,

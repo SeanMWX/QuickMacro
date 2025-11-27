@@ -26,6 +26,7 @@ def run_app(qm):
     load_settings = qm.load_settings
     select_current_action_in_dropdown = qm.select_current_action_in_dropdown
     compute_action_total_ms = qm.compute_action_total_ms
+    get_restart_timeout_ms = qm.get_restart_timeout_ms if 'get_restart_timeout_ms' in vars(qm) else None
     action_parse_line = qm.action_parse_line
     action_compose_line = qm.action_compose_line
     UiState = qm.UiState if 'UiState' in vars(qm) else qm.__dict__.get('UiState', None)
@@ -211,6 +212,8 @@ def run_app(qm):
     monitorTotalLabel.place(x=460, y=40, width=180, height=24)
     dungeonTimeLabel = ttk.Label(monitorCard, text='Dungeon time: 0.0s', style='CardLabel.TLabel')
     dungeonTimeLabel.place(x=12, y=70, width=250, height=24)
+    restartTimeLabel = ttk.Label(monitorCard, text='Restart time: 3600000ms', style='CardLabel.TLabel')
+    restartTimeLabel.place(x=280, y=70, width=260, height=24)
     # Monitor state & helpers
     state.monitor_total_loops = 0
     state.monitor_completed_loops = 0
@@ -218,6 +221,7 @@ def run_app(qm):
     state.monitor_timer_job = None
     state.monitor_total_time_s = 0.0
     state.dungeon_start_ts = None
+    state.restart_timeout_ms = getattr(state, 'restart_timeout_ms', 3600000)
     state.current_run_idx = 0
     state.current_run_action = ''
     state.current_run_interrupted = False
@@ -228,6 +232,11 @@ def run_app(qm):
     state.current_run_action = ''
     state.current_run_interrupted = False
     state.skip_run_increment = False
+    def _resolve_action_path(name: str) -> str:
+        if not name:
+            return ''
+        candidate = os.path.join('actions', name)
+        return candidate if os.path.exists(candidate) else name
     def log_event(msg: str):
         try:
             ts = datetime.now().strftime('%H:%M:%S')
@@ -276,14 +285,27 @@ def run_app(qm):
             if state.dungeon_start_ts is not None:
                 dungeon_elapsed = max(0.0, time.monotonic() - state.dungeon_start_ts)
             dungeonTimeLabel['text'] = f"Dungeon time: {dungeon_elapsed:.1f}s"
+            restart_ms = getattr(state, 'restart_timeout_ms', 0) or 0
+            restartTimeLabel['text'] = f"Restart time: {int(restart_ms)}ms"
         except Exception:
             pass
+
+    def refresh_restart_timeout_from_selection(*_):
+        try:
+            path = _resolve_action_path(actionFileVar.get().strip())
+            if get_restart_timeout_ms:
+                state.restart_timeout_ms = get_restart_timeout_ms(path)
+            else:
+                state.restart_timeout_ms = getattr(state, 'restart_timeout_ms', 3600000) or 3600000
+        except Exception:
+            state.restart_timeout_ms = 3600000
+        update_monitor_labels()
 
     def _tick_monitor():
         update_monitor_labels()
         # auto restart if dungeon time exceeds configured timeout
         try:
-            timeout_ms = monitorTimeoutMs.get()
+            timeout_ms = getattr(state, 'restart_timeout_ms', 0)
             if timeout_ms and timeout_ms > 0 and state.dungeon_start_ts is not None:
                 dungeon_elapsed = max(0.0, time.monotonic() - state.dungeon_start_ts)
                 if dungeon_elapsed >= (timeout_ms / 1000.0):
@@ -441,6 +463,7 @@ def run_app(qm):
         apply_settings_to_ui(_settings)
     except Exception:
         pass
+    refresh_restart_timeout_from_selection()
     # 变更即保存
     try:
         playCount.trace_add('write', lambda *_: save_settings())
@@ -456,10 +479,23 @@ def run_app(qm):
             infiniteRepeatVar.trace('w', lambda *_: save_settings())
         except Exception:
             pass
+    def _on_action_selected(*_):
+        try:
+            save_settings()
+        except Exception:
+            pass
+        refresh_restart_timeout_from_selection()
     try:
-        actionFileSelect.bind('<<ComboboxSelected>>', lambda *_: save_settings())
+        actionFileSelect.bind('<<ComboboxSelected>>', _on_action_selected)
     except Exception:
         pass
+    try:
+        actionFileVar.trace_add('write', refresh_restart_timeout_from_selection)
+    except Exception:
+        try:
+            actionFileVar.trace('w', refresh_restart_timeout_from_selection)
+        except Exception:
+            pass
     # Persist game mode changes
     try:
         gameModeVar.trace_add('write', lambda *_: save_settings())
@@ -1105,34 +1141,6 @@ def run_app(qm):
         del_btn.pack(side='left', padx=6)
         # Removed Up/Down buttons in favor of drag-to-reorder
     
-    # Monitor timeout (ms)
-    global monitorTimeoutMs
-    monitorTimeoutMs = tkinter.IntVar()
-    monitorTimeoutMs.set(240000)
-    timeoutLabel = ttk.Label(replayCard, text='Restart time (ms)', style='CardLabel.TLabel')
-    timeoutLabel.place(x=15, y=205, width=150, height=26)
-    timeoutEntry = ttk.Entry(replayCard, textvariable=monitorTimeoutMs, style='Biz.TEntry')
-    timeoutEntry.place(x=170, y=205, width=120, height=26)
-    # Trace timeout changes: validate and persist, enforce sane minimum
-    def _commit_timeout(*_):
-        try:
-            val = int(monitorTimeoutMs.get())
-            if val < 5000:  # min 5s to avoid误触发
-                monitorTimeoutMs.set(5000)
-        except Exception:
-            monitorTimeoutMs.set(240000)
-        try:
-            save_settings()
-        except Exception:
-            pass
-    try:
-        monitorTimeoutMs.trace_add('write', _commit_timeout)
-    except Exception:
-        try:
-            monitorTimeoutMs.trace('w', _commit_timeout)
-        except Exception:
-            pass
-    
     editBtn = ttk.Button(replayCard, text='Edit', command=open_action_editor, style='Biz.TButton')
     editBtn.place(x=120, y=235, width=80, height=28)
     openBtn = ttk.Button(replayCard, text='Folder', command=open_actions_folder, style='Biz.TButton')
@@ -1150,7 +1158,6 @@ def run_app(qm):
         gameModeVar=gameModeVar,
         gameModeGainVar=gameModeGainVar,
         gameModeAutoVar=gameModeAutoVar,
-        monitorTimeoutMs=monitorTimeoutMs,
         log_event=log_event,
         update_ui_for_state=update_ui_for_state,
         begin_run=begin_run,

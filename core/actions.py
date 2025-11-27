@@ -22,6 +22,8 @@ def parse_action_line(s: str) -> Dict[str, str]:
                 d['y'] = parts[3] if len(parts) > 3 else ''
             elif d['op'] == 'START':
                 d['x'] = parts[2] if len(parts) > 2 else ''
+            elif d['op'] == 'RESTART':
+                d['x'] = parts[2] if len(parts) > 2 else ''
             return d
         if parts[0] == 'K':
             d['type'] = 'VK'
@@ -71,6 +73,8 @@ def compose_action_line(d: Dict[str, str]) -> str:
             return f"META SCREEN {d.get('x','')} {d.get('y','')}".strip()
         if op.upper() == 'START':
             return f"META START {d.get('x','')}".strip()
+        if op.upper() == 'RESTART':
+            return f"META RESTART {d.get('x','')}".strip()
         return d.get('raw', '')
     if t == 'VK':
         return f"K {op} {d.get('vk','')} {d.get('ms','')}".strip()
@@ -91,6 +95,7 @@ def compose_action_line(d: Dict[str, str]) -> str:
 def extract_meta(lines):
     meta_screen = ''
     meta_start = ''
+    meta_restart = ''
     meta_lines = []
     for s in lines:
         if s.startswith('META '):
@@ -100,5 +105,6 @@ def extract_meta(lines):
                 meta_screen = f"{parts[2]}x{parts[3]}"
             if len(parts) >= 3 and parts[1] == 'START':
                 meta_start = parts[2]
-    return meta_lines, meta_screen, meta_start
-
+            if len(parts) >= 3 and parts[1] == 'RESTART':
+                meta_restart = parts[2]
+    return meta_lines, meta_screen, meta_start, meta_restart
