@@ -33,6 +33,8 @@ def run_app(qm):
     PlaybackController = qm.PlaybackController
     MonitorThread = qm.MonitorThread
     HotkeyController = qm.HotkeyController
+    ListenController = qm.ListenController
+    ExecuteController = qm.ExecuteController
     UIRefs = qm.UIRefs
     # helper assignments for globals compatibility
     globals_ref = qm.__dict__
@@ -281,7 +283,7 @@ def run_app(qm):
         update_monitor_labels()
         # auto restart if dungeon time exceeds configured timeout
         try:
-            timeout_ms = monitorTimeoutMs.get() if 'monitorTimeoutMs' in globals() else None
+            timeout_ms = monitorTimeoutMs.get()
             if timeout_ms and timeout_ms > 0 and state.dungeon_start_ts is not None:
                 dungeon_elapsed = max(0.0, time.monotonic() - state.dungeon_start_ts)
                 if dungeon_elapsed >= (timeout_ms / 1000.0):
@@ -418,6 +420,8 @@ def run_app(qm):
         on_loop_start=update_replay_loop_start,
         logger=log_event
     )
+    listen_controller = ListenController(state, None)  # ui_refs patched later
+    execute_controller = ExecuteController(state, None, command_adapter, release_all_inputs)
     
     actionFileVar = tkinter.StringVar()
     files = list_action_files()
@@ -1154,7 +1158,11 @@ def run_app(qm):
         mark_finished=mark_finished,
         recording_controller=recording_controller,
         playback_controller=playback_controller,
+        listen_controller=listen_controller,
+        execute_controller=execute_controller,
     )
+    listen_controller.ui_refs = qm.ui_refs
+    execute_controller.ui_refs = qm.ui_refs
 
     # Start hotkeys listener (F10/F11)
     HotkeyController(state, root, lambda: command_adapter('listen'), lambda: command_adapter('execute')).start()

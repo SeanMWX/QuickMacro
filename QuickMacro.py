@@ -30,6 +30,8 @@ from controllers.monitor import MonitorThread
 from controllers.recording import RecordingController
 from controllers.playback import PlaybackController
 from controllers.hotkeys import HotkeyController
+from controllers.listen import ListenController
+from controllers.execute import ExecuteController
 
 @dataclass
 class AppState:
@@ -88,6 +90,10 @@ class UIRefs:
     mark_finished: object
     recording_controller: object
     playback_controller: object
+    listen_controller: object
+    execute_controller: object
+    listen_controller: object
+    execute_controller: object
 
 # Simple UI state enum for readability
 class UiState:
@@ -117,23 +123,22 @@ def _is_running_as_admin():
         return False
 
 def relaunch_as_admin_if_needed():
-    """Windows: 若非管理员尝试以管理员重启自身；失败时提示用户手动以管理员运行。"""
+    """Windows: try to elevate; on success exit current instance so only elevated UI remains."""
     try:
         if os.name != 'nt':
             return
-        if _is_running_as_admin():
-            logging.info('Admin check: running as administrator.')
+        if _is_running_as_admin() or '--elevated' in sys.argv:
+            logging.info('Admin check: running as administrator or elevated flag present.')
             return
         script = os.path.abspath(__file__)
-        params = ' '.join([f'"{script}"'] + [f'"{a}"' for a in sys.argv[1:]])
+        params = ' '.join([f'"{script}"', '--elevated'] + [f'"{a}"' for a in sys.argv[1:]])
         logging.info('Admin check: attempting UAC elevation...')
-        rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 1)
-        if rc <= 32:
-            logging.warning(f'UAC elevation failed, rc={rc}.')
-            _win_message_box('需要管理员权限', '未能自动获取管理员权限，请右键以管理员方式运行 QuickMacro。\n否则游戏内全局热键与鼠标可能失效。', 0x30)
-        else:
-            # UAC 提示已弹出，当前实例退出以避免重复窗口
+        rc = ctypes.windll.shell32.ShellExecuteW(None, 'runas', sys.executable, params, None, 1)
+        if rc > 32:
             os._exit(0)
+        else:
+            logging.warning(f'UAC elevation failed, rc={rc}.')
+            _win_message_box('Need admin', 'Could not elevate automatically. Please run as administrator for better compatibility.', 0x30)
     except Exception as e:
         try:
             logging.exception('UAC elevation exception: %s', e)
@@ -360,6 +365,15 @@ def command_adapter(action):
         if action == 'listen':
             if ui_refs.recording_controller:
                 ui_refs.recording_controller.start()
+            # start listen controller to capture ESC during recording
+            try:
+                if ui_refs.listen_controller and ui_refs.listen_controller.is_alive():
+                    pass
+                else:
+                    ui_refs.listen_controller = ListenController(state, ui_refs)
+                    ui_refs.listen_controller.start()
+            except Exception:
+                pass
 
         elif action == 'execute':
             # set the selected action file for replay
@@ -497,7 +511,14 @@ def command_adapter(action):
                     )
             except Exception:
                 pass
-            ExecuteController().start()
+            try:
+                if ui_refs.execute_controller and ui_refs.execute_controller.is_alive():
+                    pass
+                else:
+                    ui_refs.execute_controller = ExecuteController(state, ui_refs, command_adapter, release_all_inputs)
+                    ui_refs.execute_controller.start()
+            except Exception:
+                pass
             state.can_start_listening = False
             state.can_start_executing = False
     else:
@@ -525,132 +546,6 @@ def command_adapter(action):
 ## Countdown removed — direct start/stop via F10/F11
 
 ######################################################################
-class ListenController(threading.Thread):
-    
-    def __init__(self):
-        super().__init__()
-        self.daemon = True
-
-    def run(self):
-        try:
-            state.ev_stop_listen.clear()
-        except Exception:
-            pass
-        
-        def on_release(key):
-            
-            if key == keyboard.Key.esc:
-                try:
-                    state.ev_stop_listen.set()
-                except Exception:
-                    pass
-                state.can_start_listening = True
-                state.can_start_executing = True
-                ui_refs.update_ui_for_state(UiState.IDLE)
-                keyboardListener.stop()
-
-        with keyboard.Listener(on_release=on_release) as keyboardListener:
-            keyboardListener.join()
-
-class ExecuteController(threading.Thread):
-    
-    def __init__(self):
-        super().__init__()
-        self.daemon = True
-
-    def run(self):
-
-        def on_release(key):
-            return
-
-        keyboardListener = keyboard.Listener(on_release=on_release)
-        keyboardListener.start()
-
-        # Wait until all active workers have finished (or ESC pressed)
-        while not (state.ev_stop_execute_keyboard.is_set() and state.ev_stop_execute_mouse.is_set()):
-            time.sleep(0.05)
-
-        # Safety: release any stuck inputs
-        release_all_inputs()
-        ui_refs.log_event("Replay stopped")
-
-        # Reset UI and states once everything is done
-        state.can_start_listening = True
-        state.can_start_executing = True
-        ui_refs.update_ui_for_state(UiState.IDLE)
-        # Sequential restart flow: if restarting_flag is set, chain restart.action then resume main
-        try:
-            base_name = os.path.basename(state.action_file_name) if state.action_file_name else ''
-            if not state.restarting_flag:
-                ui_refs.mark_finished()
-            elif state.restarting_flag and state.pending_main_action:
-                # If we just finished main (not restart), start restart.action once
-                if base_name.lower() != 'restart.action' and not state.restart_running:
-                    def _start_restart():
-                        try:
-                            state.restart_running = True
-                            state.action_file_name = os.path.join('actions', 'restart.action')
-                            ui_refs.actionFileVar.set('restart.action')
-                            state.ev_stop_execute_keyboard.clear()
-                            state.ev_stop_execute_mouse.clear()
-                            state.skip_run_increment = True
-                            command_adapter('execute')
-                            state.skip_run_increment = False
-                            # schedule a forced switch back after 13s to avoid looping
-                            try:
-                                if state.restart_back_job:
-                                    ui_refs.root.after_cancel(state.restart_back_job)
-                            except Exception:
-                                pass
-                            try:
-                                def _resume_fallback():
-                                    # Only act if still in restart phase
-                                    if state.restart_running:
-                                        state.ev_stop_execute_keyboard.set()
-                                        state.ev_stop_execute_mouse.set()
-                                state.restart_back_job = ui_refs.root.after(13000, _resume_fallback)
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
-                    ui_refs.root.after(0, _start_restart)
-                elif base_name.lower() == 'restart.action' and state.restart_running:
-                    # restart finished, resume main
-                    def _resume_main():
-                        try:
-                            main_path = state.pending_main_action
-                            if main_path and (not os.path.exists(main_path)):
-                                cand = os.path.join('actions', os.path.basename(main_path))
-                                if os.path.exists(cand):
-                                    main_path = cand
-                            state.action_file_name = main_path or ''
-                            if main_path:
-                                ui_refs.actionFileVar.set(os.path.basename(main_path))
-                            if state.pending_main_playcount not in (None, ''):
-                                ui_refs.playCount.set(int(state.pending_main_playcount))
-                            state.pending_main_action = None
-                            state.pending_main_playcount = None
-                            state.restarting_flag = False
-                            state.restart_running = False
-                            try:
-                                if state.restart_back_job:
-                                    ui_refs.root.after_cancel(state.restart_back_job)
-                            except Exception:
-                                pass
-                            state.ev_stop_execute_keyboard.clear()
-                            state.ev_stop_execute_mouse.clear()
-                            state.skip_run_increment = True
-                            command_adapter('execute')
-                            state.skip_run_increment = False
-                        except Exception:
-                            pass
-                    ui_refs.root.after(0, _resume_main)
-        except Exception:
-            pass
-        keyboardListener.stop()
-
-######################################################################
-# Global Hotkeys (F10/F11)
 ######################################################################
 ######################################################################
 # GUI
