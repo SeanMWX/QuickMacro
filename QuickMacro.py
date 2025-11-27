@@ -12,6 +12,7 @@ import tkinter
 from tkinter import ttk
 import tkinter.font as tkfont
 import tkinter.messagebox as messagebox
+from tkinter import scrolledtext
 import cv2
 import numpy as np
 import pyautogui
@@ -366,6 +367,7 @@ def command_adapter(action):
         if action == 'listen':
             # setup shared action file and start time
             init_new_action_file()
+            log_event(f"Start recording -> {action_file_name}")
             # update UI selection to the new file
             select_current_action_in_dropdown()
             # reset listen stop event
@@ -396,6 +398,16 @@ def command_adapter(action):
             else:
                 # use selected file (prefer actions/, fallback root)
                 action_file_name = sel_path if os.path.exists(sel_path) else selected
+            # bookkeeping for run index
+            global current_run_idx, current_run_action, current_run_interrupted, skip_run_increment
+            if not skip_run_increment:
+                current_run_idx += 1
+                current_run_action = os.path.basename(action_file_name)
+                current_run_interrupted = False
+                log_event(f"Run #{current_run_idx} start: {current_run_action}")
+            else:
+                log_event(f"Run #{current_run_idx} resume: {current_run_action or os.path.basename(action_file_name)}")
+                skip_run_increment = False
             # 每次启动常规脚本时重置重启标记，避免上次流程遗留导致后续超时不触发
             try:
                 if os.path.basename(action_file_name).lower() != 'restart.action':
@@ -452,6 +464,7 @@ def command_adapter(action):
                         # run restart.action once, then resume original main action
                         try:
                             global can_start_listening, can_start_executing, pending_main_action, pending_main_playcount, restarting_flag, restart_back_job, action_file_name
+                            global current_run_interrupted, current_run_idx
                             if restarting_flag:
                                 return
                             restarting_flag = True
@@ -460,6 +473,8 @@ def command_adapter(action):
                                 pending_main_playcount = playCount.get()
                             except Exception:
                                 pending_main_playcount = None
+                            current_run_interrupted = True
+                            log_event(f"Run #{current_run_idx} interrupted -> restart.action")
                             actionFileVar.set('restart.action')
 
                             def _replayer_busy():
@@ -513,7 +528,7 @@ def command_adapter(action):
                                 except Exception:
                                     pass
                                 def _resume_main():
-                                    global pending_main_action, pending_main_playcount
+                                    global pending_main_action, pending_main_playcount, skip_run_increment, current_run_idx
                                     try:
                                         if not main_path:
                                             pending_main_action = None
@@ -541,7 +556,13 @@ def command_adapter(action):
                                     can_start_listening = True
                                     can_start_executing = True
                                     try:
-                                        root.after(0, lambda: command_adapter('execute'))
+                                        def _do_resume():
+                                            global skip_run_increment
+                                            skip_run_increment = True
+                                            log_event(f"Run #{current_run_idx} resume after restart")
+                                            command_adapter('execute')
+                                            skip_run_increment = False
+                                        root.after(0, _do_resume)
                                     except Exception:
                                         pass
                                 def _wait_until_stopped(deadline=None):
@@ -670,6 +691,7 @@ class ExecuteController(threading.Thread):
         global ev_stop_execute_mouse
         global can_start_listening 
         global can_start_executing
+        global current_run_idx, current_run_action, current_run_interrupted, skip_run_increment, restarting_flag, pending_main_playcount
 
         def on_release(key):
             return
@@ -683,6 +705,7 @@ class ExecuteController(threading.Thread):
 
         # Safety: release any stuck inputs
         release_all_inputs()
+        log_event("Replay stopped")
 
         # Reset UI and states once everything is done
         can_start_listening = True
@@ -690,11 +713,16 @@ class ExecuteController(threading.Thread):
         update_ui_for_state(AppState.IDLE)
         # If restart.action just finished, auto resume pending main action
         try:
-            global restarting_flag, pending_main_action
+            global restarting_flag, pending_main_action, pending_main_playcount, skip_run_increment, current_run_idx, current_run_action
             base_name = os.path.basename(action_file_name) if 'action_file_name' in globals() else ''
+            if not restarting_flag:
+                log_event(f"Run #{current_run_idx} finished: {current_run_action}")
             if restarting_flag and pending_main_action and base_name.lower() == 'restart.action':
+                log_event("Restart finished, resuming main script")
                 next_action = pending_main_action
+                next_count = pending_main_playcount
                 pending_main_action = None
+                pending_main_playcount = None
                 restarting_flag = False
                 # resolve path for main action and set globals/selection
                 try:
@@ -705,6 +733,8 @@ class ExecuteController(threading.Thread):
                             main_path = candidate
                     action_file_name = main_path
                     actionFileVar.set(os.path.basename(main_path))
+                    if next_count not in (None, ''):
+                        playCount.set(int(next_count))
                 except Exception:
                     pass
                 # ensure stop events are cleared for next run
@@ -715,8 +745,15 @@ class ExecuteController(threading.Thread):
                     pass
                 can_start_listening = True
                 can_start_executing = True
-                # kick off main action on UI thread
-                root.after(0, lambda: command_adapter('execute'))
+                # kick off main action on UI thread without incrementing run counter
+                def _do_resume():
+                    global skip_run_increment, current_run_interrupted
+                    skip_run_increment = True
+                    current_run_interrupted = False
+                    log_event(f"Run #{current_run_idx} resume after restart")
+                    command_adapter('execute')
+                    skip_run_increment = False
+                root.after(0, _do_resume)
         except Exception:
             pass
         keyboardListener.stop()
@@ -736,6 +773,7 @@ class HotkeyController(threading.Thread):
             global root, ev_stop_listen
             # if idle, start recording; else stop via ESC
             if can_start_listening and can_start_executing:
+                log_event("Recording requested (F10)")
                 try:
                     # schedule on Tk main thread to avoid cross-thread UI ops
                     root.after(0, lambda: command_adapter('listen'))
@@ -754,6 +792,7 @@ class HotkeyController(threading.Thread):
                     root.after(0, lambda: update_ui_for_state(AppState.IDLE))
                 except Exception:
                     pass
+                log_event("Recording stopped")
 
         def toggle_replay():
             global can_start_listening, can_start_executing
@@ -761,12 +800,14 @@ class HotkeyController(threading.Thread):
             global root
             # if idle, start replay; else request stop
             if can_start_listening and can_start_executing:
+                log_event("Replay requested (F11)")
                 try:
                     # schedule on Tk main thread to avoid cross-thread UI ops
                     root.after(0, lambda: command_adapter('execute'))
                 except Exception:
                     command_adapter('execute')
             else:
+                log_event("Replay stop requested")
                 try:
                     ev_stop_execute_keyboard.set()
                     ev_stop_execute_mouse.set()
@@ -883,7 +924,7 @@ if __name__ == '__main__':
     # Business theme: avoid decorative background image for a clean look
 
     root.title('Quick Macro')
-    root.geometry('720x470')
+    root.geometry('720x680')
     root.resizable(0,0)
 
     # title
@@ -907,6 +948,14 @@ if __name__ == '__main__':
     replayCard.place(x=360, y=70, width=330, height=280)
     monitorCard = ttk.Frame(root, style='Card.TFrame', borderwidth=1, relief='solid')
     monitorCard.place(x=30, y=360, width=660, height=110)
+    logCard = ttk.Frame(root, style='Card.TFrame', borderwidth=1, relief='solid')
+    logCard.place(x=30, y=480, width=660, height=180)
+
+    # Log area
+    logLabel = ttk.Label(logCard, text='Logs', style='CardLabel.TLabel')
+    logLabel.place(x=12, y=8, width=80, height=24)
+    logText = scrolledtext.ScrolledText(logCard, wrap='word', height=8, state='disabled', font=(font_family, 10))
+    logText.place(x=12, y=36, width=636, height=130)
 
     # start recording
     startListenerBtn = ttk.Button(recordCard, text="Start recording (F10)", command=lambda: command_adapter('listen'), style='Center.TButton')
@@ -971,6 +1020,23 @@ if __name__ == '__main__':
     monitor_timer_job = None
     monitor_total_time_s = 0.0
     dungeon_start_ts = None
+    current_run_idx = 0
+    current_run_action = ''
+    current_run_interrupted = False
+    skip_run_increment = False
+    current_run_idx = 0
+    current_run_action = ''
+    current_run_interrupted = False
+    skip_run_increment = False
+    def log_event(msg: str):
+        try:
+            ts = datetime.now().strftime('%H:%M:%S')
+            logText.configure(state='normal')
+            logText.insert('end', f"[{ts}] {msg}\n")
+            logText.see('end')
+            logText.configure(state='disabled')
+        except Exception:
+            pass
 
     def update_monitor_labels():
         try:
