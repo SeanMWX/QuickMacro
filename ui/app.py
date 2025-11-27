@@ -33,6 +33,7 @@ def run_app(qm):
     PlaybackController = qm.PlaybackController
     MonitorThread = qm.MonitorThread
     HotkeyController = qm.HotkeyController
+    UIRefs = qm.UIRefs
     # helper assignments for globals compatibility
     globals_ref = qm.__dict__
 
@@ -1132,26 +1133,28 @@ def run_app(qm):
     editBtn.place(x=120, y=235, width=80, height=28)
     openBtn = ttk.Button(replayCard, text='Folder', command=open_actions_folder, style='Biz.TButton')
     openBtn.place(x=15, y=235, width=100, height=28)
-    
-    # expose key UI refs back to qm module for existing logic
-    qm.root = root
-    qm.actionFileVar = actionFileVar
-    qm.actionFileSelect = actionFileSelect
-    qm.startExecuteBtn = startExecuteBtn
-    qm.startListenerBtn = startListenerBtn
-    qm.playCount = playCount
-    qm.infiniteRepeatVar = infiniteRepeatVar
-    qm.gameModeVar = gameModeVar
-    qm.gameModeGainVar = gameModeGainVar
-    qm.gameModeAutoVar = gameModeAutoVar
-    qm.monitorTimeoutMs = monitorTimeoutMs
-    qm.log_event = log_event
-    qm.update_ui_for_state = update_ui_for_state
-    qm.begin_run = begin_run
-    qm.mark_interrupted = mark_interrupted
-    qm.mark_finished = mark_finished
-    qm.recording_controller = recording_controller
-    qm.playback_controller = playback_controller
+
+    # expose key UI refs back to qm module via UIRefs container
+    qm.ui_refs = UIRefs(
+        root=root,
+        actionFileVar=actionFileVar,
+        actionFileSelect=actionFileSelect,
+        startExecuteBtn=startExecuteBtn,
+        startListenerBtn=startListenerBtn,
+        playCount=playCount,
+        infiniteRepeatVar=infiniteRepeatVar,
+        gameModeVar=gameModeVar,
+        gameModeGainVar=gameModeGainVar,
+        gameModeAutoVar=gameModeAutoVar,
+        monitorTimeoutMs=monitorTimeoutMs,
+        log_event=log_event,
+        update_ui_for_state=update_ui_for_state,
+        begin_run=begin_run,
+        mark_interrupted=mark_interrupted,
+        mark_finished=mark_finished,
+        recording_controller=recording_controller,
+        playback_controller=playback_controller,
+    )
 
     # Start hotkeys listener (F10/F11)
     HotkeyController(state, root, lambda: command_adapter('listen'), lambda: command_adapter('execute')).start()

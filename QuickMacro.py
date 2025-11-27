@@ -65,6 +65,29 @@ class AppState:
     skip_run_increment: bool = False
 
 state = AppState()
+ui_refs = None
+
+# UI references container
+@dataclass
+class UIRefs:
+    root: object
+    actionFileVar: object
+    actionFileSelect: object
+    startExecuteBtn: object
+    startListenerBtn: object
+    playCount: object
+    infiniteRepeatVar: object
+    gameModeVar: object
+    gameModeGainVar: object
+    gameModeAutoVar: object
+    monitorTimeoutMs: object
+    log_event: object
+    update_ui_for_state: object
+    begin_run: object
+    mark_interrupted: object
+    mark_finished: object
+    recording_controller: object
+    playback_controller: object
 
 # Simple UI state enum for readability
 class UiState:
@@ -105,12 +128,12 @@ def relaunch_as_admin_if_needed():
         params = ' '.join([f'"{script}"'] + [f'"{a}"' for a in sys.argv[1:]])
         logging.info('Admin check: attempting UAC elevation...')
         rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 1)
-        if rc > 32:
-            # Elevation prompt launched; exit current (non-elevated) instance to avoid duplicate windows
-            os._exit(0)
-        else:
+        if rc <= 32:
             logging.warning(f'UAC elevation failed, rc={rc}.')
             _win_message_box('需要管理员权限', '未能自动获取管理员权限，请右键以管理员方式运行 QuickMacro。\n否则游戏内全局热键与鼠标可能失效。', 0x30)
+        else:
+            # UAC 提示已弹出，当前实例退出以避免重复窗口
+            os._exit(0)
     except Exception as e:
         try:
             logging.exception('UAC elevation exception: %s', e)
@@ -210,83 +233,88 @@ def compute_action_total_ms(path: str) -> int:
 # Controllers
 ######################################################################
 def save_settings():
+    if ui_refs is None:
+        return
     data = {}
     try:
-        data['play_count'] = int(playCount.get())
+        data['play_count'] = int(ui_refs.playCount.get())
     except Exception:
         data['play_count'] = 1
     try:
-        data['infinite'] = bool(infiniteRepeatVar.get())
+        data['infinite'] = bool(ui_refs.infiniteRepeatVar.get())
     except Exception:
         data['infinite'] = False
     try:
-        val = actionFileVar.get().strip()
+        val = ui_refs.actionFileVar.get().strip()
         if val:
             data['last_action'] = val
     except Exception:
         pass
     # persist game mode selection if available
     try:
-        data['game_mode_relative'] = bool(gameModeVar.get())
+        data['game_mode_relative'] = bool(ui_refs.gameModeVar.get())
     except Exception:
         pass
     # persist game mode gain/auto if available
     try:
-        data['game_mode_gain'] = float(gameModeGainVar.get())
+        data['game_mode_gain'] = float(ui_refs.gameModeGainVar.get())
     except Exception:
         pass
     try:
-        data['game_mode_auto'] = bool(gameModeAutoVar.get())
+        data['game_mode_auto'] = bool(ui_refs.gameModeAutoVar.get())
     except Exception:
         pass
     try:
-        data['monitor_timeout_ms'] = int(monitorTimeoutMs.get())
+        data['monitor_timeout_ms'] = int(ui_refs.monitorTimeoutMs.get())
     except Exception:
         pass
     settings_mod.save_settings(data, SETTINGS_PATH)
 
 def apply_settings_to_ui(settings: dict):
+    if ui_refs is None:
+        return
     try:
-        settings_mod.apply_settings_to_ui(settings, playCount, infiniteRepeatVar, actionFileVar, list_action_files)
+        settings_mod.apply_settings_to_ui(settings, ui_refs.playCount, ui_refs.infiniteRepeatVar, ui_refs.actionFileVar, list_action_files)
     except Exception:
         pass
     # apply game mode selection from settings
     try:
-        if 'game_mode_relative' in settings and 'gameModeVar' in globals():
-            gameModeVar.set(bool(settings.get('game_mode_relative', False)))
+        if 'game_mode_relative' in settings:
+            ui_refs.gameModeVar.set(bool(settings.get('game_mode_relative', False)))
     except Exception:
         pass
     try:
-        if 'gameModeGainVar' in globals() and 'game_mode_gain' in settings:
-            gameModeGainVar.set(float(settings.get('game_mode_gain', 1.0) or 1.0))
+        if 'game_mode_gain' in settings:
+            ui_refs.gameModeGainVar.set(float(settings.get('game_mode_gain', 1.0) or 1.0))
     except Exception:
         pass
     try:
-        if 'gameModeAutoVar' in globals() and 'game_mode_auto' in settings:
-            gameModeAutoVar.set(bool(settings.get('game_mode_auto', True)))
+        if 'ui_refs.gameModeAutoVar' in globals() and 'game_mode_auto' in settings:
+            ui_refs.gameModeAutoVar.set(bool(settings.get('game_mode_auto', True)))
     except Exception:
         pass
     try:
-        if 'monitor_timeout_ms' in settings and 'monitorTimeoutMs' in globals():
-            monitorTimeoutMs.set(int(settings.get('monitor_timeout_ms', 240000)))
+        if 'monitor_timeout_ms' in settings and 'ui_refs.monitorTimeoutMs' in globals():
+            ui_refs.monitorTimeoutMs.set(int(settings.get('monitor_timeout_ms', 240000)))
     except Exception:
         pass
 
 # Sync the Combobox to point at the current recording file
 def select_current_action_in_dropdown():
+    if ui_refs is None:
+        return
     try:
-        if 'actionFileVar' in globals():
-            name = os.path.basename(state.action_file_name) if state.action_file_name else ''
-            files2 = list_action_files()
-            # ensure list contains the current file name
-            if name and name not in files2:
-                files2.append(name)
-            if 'actionFileSelect' in globals():
-                actionFileSelect['values'] = files2
-            if name:
-                actionFileVar.set(name)
-            elif files2:
-                actionFileVar.set(files2[-1])
+        name = os.path.basename(state.action_file_name) if state.action_file_name else ''
+        files2 = list_action_files()
+        # ensure list contains the current file name
+        if name and name not in files2:
+            files2.append(name)
+        if ui_refs.actionFileSelect:
+            ui_refs.actionFileSelect['values'] = files2
+        if name:
+            ui_refs.actionFileVar.set(name)
+        elif files2:
+            ui_refs.actionFileVar.set(files2[-1])
         # persist settings when selection changes
         try:
             save_settings()
@@ -325,27 +353,30 @@ def command_adapter(action):
     custom_thread_list = []
     print(state.can_start_listening)
     
+    if ui_refs is None:
+        return
+    
     if state.can_start_listening and state.can_start_executing:
         if action == 'listen':
-            if 'recording_controller' in globals() and recording_controller:
-                recording_controller.start()
+            if ui_refs.recording_controller:
+                ui_refs.recording_controller.start()
 
         elif action == 'execute':
             # set the selected action file for replay
-            selected = actionFileVar.get().strip() if 'actionFileVar' in globals() else ''
+            selected = ui_refs.actionFileVar.get().strip()
             # resolve to actions/ if present
             sel_path = os.path.join('actions', selected) if selected else ''
             if not selected:
-                startExecuteBtn['text'] = 'Select a .action file'
+                ui_refs.startExecuteBtn['text'] = 'Select a .action file'
                 return
             else:
                 # use selected file (prefer actions/, fallback root)
                 state.action_file_name = sel_path if os.path.exists(sel_path) else selected
             # bookkeeping for run index
             if not state.skip_run_increment:
-                begin_run(state.action_file_name, resume=False)
+                ui_refs.begin_run(state.action_file_name, resume=False)
             else:
-                begin_run(state.action_file_name, resume=True)
+                ui_refs.begin_run(state.action_file_name, resume=True)
                 state.skip_run_increment = False
             # 每次启动常规脚本时重置重启标记，避免上次流程遗留导致后续超时不触发
             try:
@@ -355,14 +386,14 @@ def command_adapter(action):
                 pass
             # init counters and flags
             try:
-                if 'infiniteRepeatVar' in globals() and bool(infiniteRepeatVar.get()):
+                if ui_refs and bool(ui_refs.infiniteRepeatVar.get()):
                     state.ev_infinite_replay.set()
                 else:
                     state.ev_infinite_replay.clear()
             except Exception:
                 pass
-            state.execute_time_keyboard = playCount.get()
-            state.execute_time_mouse = playCount.get()
+            state.execute_time_keyboard = ui_refs.playCount.get()
+            state.execute_time_mouse = ui_refs.playCount.get()
             try:
                 state.ev_stop_execute_keyboard.clear()
                 state.ev_stop_execute_mouse.clear()
@@ -406,7 +437,7 @@ def command_adapter(action):
                             state.restarting_flag = True
                             state.pending_main_action = state.action_file_name
                             try:
-                                state.pending_main_playcount = playCount.get()
+                                state.pending_main_playcount = ui_refs.playCount.get()
                             except Exception:
                                 state.pending_main_playcount = None
                             # stop current run; ExecuteController will start restart.action next
@@ -415,7 +446,7 @@ def command_adapter(action):
                         except Exception:
                             pass
                     try:
-                        timeout_s = max(1.0, float(monitorTimeoutMs.get())/1000.0)
+                        timeout_s = max(1.0, float(ui_refs.monitorTimeoutMs.get())/1000.0)
                     except Exception:
                         timeout_s = 240.0  # default 4 minutes
                     state.monitor_thread = MonitorThread(
@@ -432,33 +463,33 @@ def command_adapter(action):
             except Exception:
                 pass
             # UI updates
-            update_ui_for_state(UiState.REPLAYING)
+            ui_refs.update_ui_for_state(UiState.REPLAYING)
             # start replayer (keyboard + mouse) and controller (ESC monitor)
             try:
                 use_rel = False
                 try:
-                    use_rel = bool(gameModeVar.get())
+                    use_rel = bool(ui_refs.gameModeVar.get())
                 except Exception:
                     pass
                 try:
-                    rel_gain = float(gameModeGainVar.get())
+                    rel_gain = float(ui_refs.gameModeGainVar.get())
                 except Exception:
                     try:
                         _s = load_settings(); rel_gain = float(_s.get('game_mode_gain', 1.0) or 1.0)
                     except Exception:
                         rel_gain = 1.0
                 try:
-                    rel_auto = bool(gameModeAutoVar.get())
+                    rel_auto = bool(ui_refs.gameModeAutoVar.get())
                 except Exception:
                     try:
                         _s = load_settings(); rel_auto = bool(_s.get('game_mode_auto', True))
                     except Exception:
                         rel_auto = True
-                if 'playback_controller' in globals() and playback_controller:
-                    playback_controller.start(
+                if ui_refs.playback_controller:
+                    ui_refs.playback_controller.start(
                         state.action_file_name,
                         state.execute_time_keyboard,
-                        infinite=bool(infiniteRepeatVar.get()) if 'infiniteRepeatVar' in globals() else False,
+                        infinite=bool(ui_refs.infiniteRepeatVar.get()) if ui_refs else False,
                         use_rel=use_rel,
                         rel_gain=rel_gain,
                         rel_auto=rel_auto,
@@ -479,11 +510,11 @@ def command_adapter(action):
                 pass
             state.can_start_listening = True
             state.can_start_executing = True
-            update_ui_for_state(UiState.IDLE)
-            log_event("Replay stop requested")
+            ui_refs.update_ui_for_state(UiState.IDLE)
+            ui_refs.log_event("Replay stop requested")
         else:
             try:
-                log_event(f"Skip action '{action}': busy (state.can_start_listening={state.can_start_listening}, state.can_start_executing={state.can_start_executing})")
+                ui_refs.log_event(f"Skip action '{action}': busy (state.can_start_listening={state.can_start_listening}, state.can_start_executing={state.can_start_executing})")
             except Exception:
                 pass
             pass
@@ -515,7 +546,7 @@ class ListenController(threading.Thread):
                     pass
                 state.can_start_listening = True
                 state.can_start_executing = True
-                update_ui_for_state(UiState.IDLE)
+                ui_refs.update_ui_for_state(UiState.IDLE)
                 keyboardListener.stop()
 
         with keyboard.Listener(on_release=on_release) as keyboardListener:
@@ -541,17 +572,17 @@ class ExecuteController(threading.Thread):
 
         # Safety: release any stuck inputs
         release_all_inputs()
-        log_event("Replay stopped")
+        ui_refs.log_event("Replay stopped")
 
         # Reset UI and states once everything is done
         state.can_start_listening = True
         state.can_start_executing = True
-        update_ui_for_state(UiState.IDLE)
+        ui_refs.update_ui_for_state(UiState.IDLE)
         # Sequential restart flow: if restarting_flag is set, chain restart.action then resume main
         try:
             base_name = os.path.basename(state.action_file_name) if state.action_file_name else ''
             if not state.restarting_flag:
-                mark_finished()
+                ui_refs.mark_finished()
             elif state.restarting_flag and state.pending_main_action:
                 # If we just finished main (not restart), start restart.action once
                 if base_name.lower() != 'restart.action' and not state.restart_running:
@@ -559,7 +590,7 @@ class ExecuteController(threading.Thread):
                         try:
                             state.restart_running = True
                             state.action_file_name = os.path.join('actions', 'restart.action')
-                            actionFileVar.set('restart.action')
+                            ui_refs.actionFileVar.set('restart.action')
                             state.ev_stop_execute_keyboard.clear()
                             state.ev_stop_execute_mouse.clear()
                             state.skip_run_increment = True
@@ -568,7 +599,7 @@ class ExecuteController(threading.Thread):
                             # schedule a forced switch back after 13s to avoid looping
                             try:
                                 if state.restart_back_job:
-                                    root.after_cancel(state.restart_back_job)
+                                    ui_refs.root.after_cancel(state.restart_back_job)
                             except Exception:
                                 pass
                             try:
@@ -577,12 +608,12 @@ class ExecuteController(threading.Thread):
                                     if state.restart_running:
                                         state.ev_stop_execute_keyboard.set()
                                         state.ev_stop_execute_mouse.set()
-                                state.restart_back_job = root.after(13000, _resume_fallback)
+                                state.restart_back_job = ui_refs.root.after(13000, _resume_fallback)
                             except Exception:
                                 pass
                         except Exception:
                             pass
-                    root.after(0, _start_restart)
+                    ui_refs.root.after(0, _start_restart)
                 elif base_name.lower() == 'restart.action' and state.restart_running:
                     # restart finished, resume main
                     def _resume_main():
@@ -594,16 +625,16 @@ class ExecuteController(threading.Thread):
                                     main_path = cand
                             state.action_file_name = main_path or ''
                             if main_path:
-                                actionFileVar.set(os.path.basename(main_path))
+                                ui_refs.actionFileVar.set(os.path.basename(main_path))
                             if state.pending_main_playcount not in (None, ''):
-                                playCount.set(int(state.pending_main_playcount))
+                                ui_refs.playCount.set(int(state.pending_main_playcount))
                             state.pending_main_action = None
                             state.pending_main_playcount = None
                             state.restarting_flag = False
                             state.restart_running = False
                             try:
                                 if state.restart_back_job:
-                                    root.after_cancel(state.restart_back_job)
+                                    ui_refs.root.after_cancel(state.restart_back_job)
                             except Exception:
                                 pass
                             state.ev_stop_execute_keyboard.clear()
@@ -613,7 +644,7 @@ class ExecuteController(threading.Thread):
                             state.skip_run_increment = False
                         except Exception:
                             pass
-                    root.after(0, _resume_main)
+                    ui_refs.root.after(0, _resume_main)
         except Exception:
             pass
         keyboardListener.stop()
