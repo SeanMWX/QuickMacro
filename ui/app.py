@@ -213,7 +213,7 @@ def run_app(qm):
     dungeonTimeLabel = ttk.Label(monitorCard, text='Dungeon time: 0.0s', style='CardLabel.TLabel')
     dungeonTimeLabel.place(x=12, y=70, width=250, height=24)
     restartTimeLabel = ttk.Label(monitorCard, text='Restart time: 3600000ms', style='CardLabel.TLabel')
-    restartTimeLabel.place(x=280, y=70, width=260, height=24)
+    restartTimeLabel.place(x=220, y=70, width=260, height=24)
     # Monitor state & helpers
     state.monitor_total_loops = 0
     state.monitor_completed_loops = 0
