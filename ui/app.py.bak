@@ -203,7 +203,16 @@ def run_app(qm):
     # Monitor area (bottom)
     monitorTitle = ttk.Label(monitorCard, text='Monitor', style='CardLabel.TLabel')
     monitorTitle.place(x=12, y=8, width=80, height=24)
-    monitor_panel = MonitorPanel(monitorCard, font_family, state)
+    monitorLoopLabel = ttk.Label(monitorCard, text='Loops: 0/0', style='CardLabel.TLabel')
+    monitorLoopLabel.place(x=12, y=40, width=200, height=24)
+    monitorTimeLabel = ttk.Label(monitorCard, text='Current loop time: 0.0s', style='CardLabel.TLabel')
+    monitorTimeLabel.place(x=220, y=40, width=220, height=24)
+    monitorTotalLabel = ttk.Label(monitorCard, text='Total loop time: 0.0s', style='CardLabel.TLabel')
+    monitorTotalLabel.place(x=460, y=40, width=180, height=24)
+    dungeonTimeLabel = ttk.Label(monitorCard, text='Dungeon time: 0.0s', style='CardLabel.TLabel')
+    dungeonTimeLabel.place(x=12, y=70, width=250, height=24)
+    restartTimeLabel = ttk.Label(monitorCard, text='Restart time: 3600.0s', style='CardLabel.TLabel')
+    restartTimeLabel.place(x=220, y=70, width=260, height=24)
     # Monitor state & helpers
     state.monitor_total_loops = 0
     state.monitor_completed_loops = 0
@@ -222,11 +231,6 @@ def run_app(qm):
     state.current_run_action = ''
     state.current_run_interrupted = False
     state.skip_run_increment = False
-    def _resolve_action_path(name: str) -> str:
-        if not name:
-            return ''
-        candidate = os.path.join('actions', name)
-        return candidate if os.path.exists(candidate) else name
     def _get_replay_params():
         try:
             gain_val = float(gameModeGainVar.get())
@@ -240,12 +244,24 @@ def run_app(qm):
             'rel_gain': gain_val,
             'rel_auto': bool(gameModeAutoVar.get())
         }
+    def _resolve_action_path(name: str) -> str:
+        if not name:
+            return ''
+        candidate = os.path.join('actions', name)
+        return candidate if os.path.exists(candidate) else name
     def log_event(msg: str):
-        log_panel.log_event(msg)
-
+        try:
+            ts = datetime.now().strftime('%H:%M:%S')
+            logText.configure(state='normal')
+            logText.insert('end', f"[{ts}] {msg}\n")
+            logText.see('end')
+            logText.configure(state='disabled')
+        except Exception:
+            pass
+    
     # Run bookkeeping helpers
     def begin_run(action_path: str, resume: bool = False):
-        """???????????"""
+        """记录一次新的播放或恢复"""
         name = os.path.basename(action_path) if action_path else ''
         if resume:
             state.skip_run_increment = False
@@ -257,19 +273,34 @@ def run_app(qm):
         state.current_run_action = name
         state.current_run_interrupted = False
         log_event(f"Run #{state.current_run_idx} start: {state.current_run_action}")
-
+    
     def mark_interrupted(reason: str = ''):
-        """???? run ???"""
+        """标记当前 run 被中断"""
         state.current_run_interrupted = True
         log_event(f"Run #{state.current_run_idx} interrupted{': ' + reason if reason else ''}")
-
+    
     def mark_finished():
-        """??????"""
+        """标记正常结束"""
         if not state.current_run_interrupted:
             log_event(f"Run #{state.current_run_idx} finished: {state.current_run_action}")
-
+    
     def update_monitor_labels():
-        monitor_panel.update_labels()
+        try:
+            loops_text = f"Loops: {state.monitor_completed_loops}/{state.monitor_total_loops}" if state.monitor_total_loops else "Loops: 0/0"
+            monitorLoopLabel['text'] = loops_text
+            elapsed = 0.0
+            if state.monitor_loop_start_ts is not None:
+                elapsed = max(0.0, time.monotonic() - state.monitor_loop_start_ts)
+            monitorTimeLabel['text'] = f"Current loop time: {elapsed:.1f}s"
+            monitorTotalLabel['text'] = f"Total loop time: {state.monitor_total_time_s:.1f}s"
+            dungeon_elapsed = 0.0
+            if state.dungeon_start_ts is not None:
+                dungeon_elapsed = max(0.0, time.monotonic() - state.dungeon_start_ts)
+            dungeonTimeLabel['text'] = f"Dungeon time: {dungeon_elapsed:.1f}s"
+            restart_ms = getattr(state, 'restart_timeout_ms', 0) or 0
+            restartTimeLabel['text'] = f"Restart time: {restart_ms/1000.0:.1f}s"
+        except Exception:
+            pass
 
     def refresh_restart_timeout_from_selection(*_):
         try:
@@ -307,7 +338,7 @@ def run_app(qm):
             state.monitor_timer_job = root.after(200, _tick_monitor)
         except Exception:
             state.monitor_timer_job = None
-
+    
     def start_monitor(total_loops: int, total_time_s: float = 0.0):
         state.monitor_total_loops = max(1, int(total_loops or 1))
         state.monitor_completed_loops = 0
@@ -327,7 +358,7 @@ def run_app(qm):
             state.monitor_timer_job = None
         update_monitor_labels()
         _tick_monitor()
-
+    
     def update_replay_progress(done: int, total: int):
         try:
             state.monitor_completed_loops = int(done or 0)
@@ -339,7 +370,7 @@ def run_app(qm):
         except Exception:
             pass
         update_monitor_labels()
-
+    
     def update_replay_loop_start(loop_idx: int, total: int):
         try:
             state.monitor_total_loops = int(total or state.monitor_total_loops or 0)
@@ -347,19 +378,19 @@ def run_app(qm):
             pass
         state.monitor_loop_start_ts = time.monotonic()
         update_monitor_labels()
-
+    
     # Monitor thread handle
     state.monitor_thread = None
     state.pending_main_action = None
     state.pending_main_playcount = None
     state.restarting_flag = False
     state.restart_back_job = None
-
+    
     def on_monitor_hit():
         # mark dungeon start at first detection of target image
         state.dungeon_start_ts = time.monotonic()
         update_monitor_labels()
-
+    
     def reset_monitor():
         state.monitor_total_loops = 0
         state.monitor_completed_loops = 0
@@ -372,6 +403,7 @@ def run_app(qm):
                 pass
             state.monitor_timer_job = None
         update_monitor_labels()
+    
     # UI state helper
     class UiState:
         IDLE = 'idle'

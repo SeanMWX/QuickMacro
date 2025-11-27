@@ -352,7 +352,7 @@ def _is_running_as_admin():
         return False
 
 def relaunch_as_admin_if_needed():
-    """Windows: try to elevate; on success exit current instance so only elevated UI remains."""
+    """Windows: try to elevate; if spawn succeeds, exit current process so只保留提权后的 UI."""
     try:
         if os.name != 'nt':
             return
@@ -363,11 +363,12 @@ def relaunch_as_admin_if_needed():
         params = ' '.join([f'"{script}"', '--elevated'] + [f'"{a}"' for a in sys.argv[1:]])
         logging.info('Admin check: attempting UAC elevation...')
         rc = ctypes.windll.shell32.ShellExecuteW(None, 'runas', sys.executable, params, None, 1)
-        if rc > 32:
-            os._exit(0)
-        else:
+        if rc <= 32:
             logging.warning(f'UAC elevation failed, rc={rc}.')
             _win_message_box('Need admin', 'Could not elevate automatically. Please run as administrator for better compatibility.', 0x30)
+        else:
+            logging.info('UAC elevation triggered; exiting current instance to keep only elevated UI.')
+            os._exit(0)
     except Exception as e:
         try:
             logging.exception('UAC elevation exception: %s', e)
