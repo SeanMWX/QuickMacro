@@ -9,6 +9,7 @@ import tkinter.font as tkfont
 import tkinter.messagebox as messagebox
 from pathlib import Path
 from ui.components import LogPanel, MonitorPanel
+from ui.action_editor import open_action_editor as component_open_action_editor, resolve_action_path
 
 def run_app(qm):
     # bind symbols from QuickMacro module
@@ -372,6 +373,17 @@ def run_app(qm):
                 pass
             state.monitor_timer_job = None
         update_monitor_labels()
+
+    # Override action editor with component-based implementation
+    def open_action_editor():
+        if not (state.can_start_listening and state.can_start_executing):
+            messagebox.showwarning('Busy', 'Please stop recording/replaying before editing.')
+            return
+        name = actionFileVar.get().strip()
+        if not name:
+            messagebox.showinfo('No file', 'Please select an .action file first.')
+            return
+        component_open_action_editor(root, state, name, refresh_restart_timeout_from_selection)
     # UI state helper
     class UiState:
         IDLE = 'idle'
