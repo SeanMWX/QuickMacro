@@ -4,6 +4,7 @@ import logging
 import ctypes
 import os
 import glob
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 import threading
@@ -26,21 +27,45 @@ from core.recorder import Recorder
 from core.utils import get_screen_size
 from core import settings as settings_mod
 
+
+@dataclass
+class AppState:
+    can_start_listening: bool = True
+    can_start_executing: bool = True
+    action_file_name: str = ''
+    record_start_time: float = 0.0
+    execute_time_keyboard: int = 0
+    execute_time_mouse: int = 0
+    ev_stop_execute_keyboard: threading.Event = field(default_factory=lambda: threading.Event())
+    ev_stop_execute_mouse: threading.Event = field(default_factory=lambda: threading.Event())
+    ev_stop_listen: threading.Event = field(default_factory=lambda: threading.Event())
+    ev_infinite_replay: threading.Event = field(default_factory=lambda: threading.Event())
+    pressed_vks: set = field(default_factory=set)
+    pressed_mouse_buttons: set = field(default_factory=set)
+    monitor_thread: object = None
+    monitor_timer_job: object = None
+    monitor_total_loops: int = 0
+    monitor_completed_loops: int = 0
+    monitor_loop_start_ts: float = None
+    monitor_total_time_s: float = 0.0
+    dungeon_start_ts: float = None
+    pending_main_action: str = None
+    pending_main_playcount: int = None
+    restarting_flag: bool = False
+    restart_back_job: object = None
+    current_recorder: Recorder = None
+    current_replayer: Replayer = None
+    current_run_idx: int = 0
+    current_run_action: str = ''
+    current_run_interrupted: bool = False
+    skip_run_increment: bool = False
+
+
+state = AppState()
+
 ######################################################################
 # Helpers
 ######################################################################
-def wait_until_or_stop(until_ts, stop_event, quantum=0.01):
-    """使用单调时钟的可中断等待：到达时间返回 True，途中停止返回 False"""
-    try:
-        while True:
-            if stop_event.is_set():
-                return False
-            now = time.monotonic()
-            if now >= until_ts:
-                return True
-            time.sleep(min(quantum, max(0.0, until_ts - now)))
-    except Exception:
-        return False
 def set_process_dpi_aware():
     try:
         ctypes.windll.user32.SetProcessDPIAware()
@@ -84,15 +109,14 @@ def relaunch_as_admin_if_needed():
 
 def release_all_inputs():
     # Release any keys/buttons that might have been left pressed
-    global pressed_vks, pressed_mouse_buttons
     try:
         kb = KeyBoardController()
-        for vk in list(pressed_vks):
+        for vk in list(state.pressed_vks):
             try:
                 kb.release(KeyCode.from_vk(vk))
             except Exception:
                 pass
-            pressed_vks.discard(vk)
+            state.pressed_vks.discard(vk)
     except Exception:
         pass
 
@@ -111,14 +135,13 @@ def list_action_files():
 
 def init_new_action_file():
     # Create a new action file with timestamp-based name and header/meta
-    global action_file_name, record_start_time
     ts = datetime.now().strftime('%Y%m%d-%H%M%S')
     actions_dir = ensure_actions_dir()
-    action_file_name = str(actions_dir / f"{ts}.action")
+    state.action_file_name = str(actions_dir / f"{ts}.action")
     sw, sh = get_screen_size()
-    record_start_time = time.time()
+    state.record_start_time = time.time()
     try:
-        with open(action_file_name, 'w', encoding='utf-8') as f:
+        with open(state.action_file_name, 'w', encoding='utf-8') as f:
             f.write('# QuickMacro action v1\n')
             f.write(f"META SCREEN {sw} {sh}\n")
             f.write(f"META START {ts}\n")
@@ -237,6 +260,125 @@ class MonitorThread(threading.Thread):
             except Exception:
                 pass
 
+######################################################################
+# Controllers
+######################################################################
+class RecordingController:
+    def __init__(self, on_started=None, on_stopped=None, logger=None):
+        self.on_started = on_started
+        self.on_stopped = on_stopped
+        self.logger = logger
+        self.recorder = None
+
+    def start(self):
+        if not (state.can_start_listening and state.can_start_executing):
+            return
+        init_new_action_file()
+        select_current_action_in_dropdown()
+        try:
+            state.ev_stop_listen.clear()
+        except Exception:
+            pass
+        update_ui_for_state(UiState.RECORDING)
+        try:
+            state.current_recorder = Recorder(state.action_file_name, state.ev_stop_listen)
+            state.current_recorder.start()
+        except Exception:
+            pass
+        state.can_start_listening = False
+        state.can_start_executing = False
+        if callable(self.logger):
+            self.logger(f"Start recording -> {state.action_file_name}")
+        if callable(self.on_started):
+            self.on_started()
+
+    def stop(self):
+        try:
+            state.ev_stop_listen.set()
+        except Exception:
+            pass
+        state.can_start_listening = True
+        state.can_start_executing = True
+        update_ui_for_state(UiState.IDLE)
+        if callable(self.logger):
+            self.logger("Recording stopped")
+        if callable(self.on_stopped):
+            self.on_stopped()
+
+
+class PlaybackController:
+    def __init__(self, on_started=None, on_stopped=None, logger=None):
+        self.on_started = on_started
+        self.on_stopped = on_stopped
+        self.logger = logger
+
+    def start(self, path, repeat_count, infinite=False, use_rel=False, rel_gain=1.0, rel_auto=True, total_ms=0):
+        if not (state.can_start_listening and state.can_start_executing):
+            if callable(self.logger):
+                self.logger(f"Skip start replay (busy)")
+            return
+        state.action_file_name = path
+        try:
+            if infinite:
+                state.ev_infinite_replay.set()
+            else:
+                state.ev_infinite_replay.clear()
+        except Exception:
+            pass
+        state.execute_time_keyboard = repeat_count
+        state.execute_time_mouse = repeat_count
+        try:
+            state.ev_stop_execute_keyboard.clear()
+            state.ev_stop_execute_mouse.clear()
+        except Exception:
+            pass
+        try:
+            release_all_inputs()
+        except Exception:
+            pass
+        try:
+            start_monitor(repeat_count, total_ms/1000.0)
+        except Exception:
+            pass
+        update_ui_for_state(UiState.REPLAYING)
+        # start replayer + controller
+        try:
+            def _on_progress(done, total):
+                try:
+                    update_replay_progress(done, total)
+                except Exception:
+                    pass
+            def _on_loop_start(idx, total):
+                try:
+                    update_replay_loop_start(idx, total)
+                except Exception:
+                    pass
+            state.current_replayer = Replayer(path, state.ev_stop_execute_keyboard, state.ev_stop_execute_mouse, state.ev_infinite_replay, repeat_count, use_rel, rel_gain, rel_auto, _on_progress, _on_loop_start)
+            state.current_replayer.start()
+        except Exception:
+            pass
+        ExecuteController().start()
+        state.can_start_listening = False
+        state.can_start_executing = False
+        if callable(self.logger):
+            self.logger(f"Replay started -> {path}")
+        if callable(self.on_started):
+            self.on_started()
+
+    def stop(self):
+        try:
+            state.ev_stop_execute_keyboard.set()
+            state.ev_stop_execute_mouse.set()
+        except Exception:
+            pass
+        state.can_start_listening = True
+        state.can_start_executing = True
+        update_ui_for_state(UiState.IDLE)
+        if callable(self.logger):
+            self.logger("Replay stop requested")
+        if callable(self.on_stopped):
+            self.on_stopped()
+
 def save_settings():
     data = {}
     try:
@@ -304,7 +446,7 @@ def apply_settings_to_ui(settings: dict):
 def select_current_action_in_dropdown():
     try:
         if 'actionFileVar' in globals():
-            name = os.path.basename(action_file_name) if 'action_file_name' in globals() else ''
+            name = os.path.basename(state.action_file_name) if state.action_file_name else ''
             files2 = list_action_files()
             # ensure list contains the current file name
             if name and name not in files2:
@@ -351,41 +493,32 @@ def mouse_action_template():
 # Receive Command
 ######################################################################
 def command_adapter(action):
-    # global variables
-    global can_start_listening 
-    global can_start_executing
-    global execute_time_keyboard
-    global execute_time_mouse
-    global action_file_name
-    global monitor_thread, pending_main_action, pending_main_playcount, restarting_flag, restart_back_job
-    
     # command list
     custom_thread_list = []
-    print(can_start_listening)
+    print(state.can_start_listening)
     
-    if can_start_listening and can_start_executing:
+    if state.can_start_listening and state.can_start_executing:
         if action == 'listen':
             # setup shared action file and start time
             init_new_action_file()
-            log_event(f"Start recording -> {action_file_name}")
+            log_event(f"Start recording -> {state.action_file_name}")
             # update UI selection to the new file
             select_current_action_in_dropdown()
             # reset listen stop event
             try:
-                ev_stop_listen.clear()
+                state.ev_stop_listen.clear()
             except Exception:
                 pass
             # UI updates
-            update_ui_for_state(AppState.RECORDING)
+            update_ui_for_state(UiState.RECORDING)
             # start recorder (keyboard + mouse)
             try:
-                global current_recorder
-                current_recorder = Recorder(action_file_name, ev_stop_listen)
-                current_recorder.start()
+                state.current_recorder = Recorder(state.action_file_name, state.ev_stop_listen)
+                state.current_recorder.start()
             except Exception:
                 pass
-            can_start_listening = False
-            can_start_executing = False
+            state.can_start_listening = False
+            state.can_start_executing = False
 
         elif action == 'execute':
             # set the selected action file for replay
@@ -397,36 +530,32 @@ def command_adapter(action):
                 return
             else:
                 # use selected file (prefer actions/, fallback root)
-                action_file_name = sel_path if os.path.exists(sel_path) else selected
+                state.action_file_name = sel_path if os.path.exists(sel_path) else selected
             # bookkeeping for run index
-            global current_run_idx, current_run_action, current_run_interrupted, skip_run_increment
-            if not skip_run_increment:
-                current_run_idx += 1
-                current_run_action = os.path.basename(action_file_name)
-                current_run_interrupted = False
-                log_event(f"Run #{current_run_idx} start: {current_run_action}")
+            if not state.skip_run_increment:
+                begin_run(state.action_file_name, resume=False)
             else:
-                log_event(f"Run #{current_run_idx} resume: {current_run_action or os.path.basename(action_file_name)}")
-                skip_run_increment = False
+                begin_run(state.action_file_name, resume=True)
+                state.skip_run_increment = False
             # 每次启动常规脚本时重置重启标记，避免上次流程遗留导致后续超时不触发
             try:
-                if os.path.basename(action_file_name).lower() != 'restart.action':
-                    restarting_flag = False
+                if os.path.basename(state.action_file_name).lower() != 'restart.action':
+                    state.restarting_flag = False
             except Exception:
                 pass
             # init counters and flags
             try:
                 if 'infiniteRepeatVar' in globals() and bool(infiniteRepeatVar.get()):
-                    ev_infinite_replay.set()
+                    state.ev_infinite_replay.set()
                 else:
-                    ev_infinite_replay.clear()
+                    state.ev_infinite_replay.clear()
             except Exception:
                 pass
-            execute_time_keyboard = playCount.get()
-            execute_time_mouse = playCount.get()
+            state.execute_time_keyboard = playCount.get()
+            state.execute_time_mouse = playCount.get()
             try:
-                ev_stop_execute_keyboard.clear()
-                ev_stop_execute_mouse.clear()
+                state.ev_stop_execute_keyboard.clear()
+                state.ev_stop_execute_mouse.clear()
             except Exception:
                 pass
             # 确保上一轮残留按键/鼠标释放干净，避免后续按键被吞掉
@@ -436,90 +565,79 @@ def command_adapter(action):
                 pass
             total_ms = 0
             try:
-                total_ms = compute_action_total_ms(action_file_name)
+                total_ms = compute_action_total_ms(state.action_file_name)
             except Exception:
                 total_ms = 0
             try:
-                start_monitor(execute_time_keyboard, total_ms/1000.0)
+                start_monitor(state.execute_time_keyboard, total_ms/1000.0)
             except Exception:
                 pass
             # start monitor thread (template detection) if image exists
             try:
-                global monitor_thread, pending_main_action, pending_main_playcount
                 monitor_img = os.path.join('assets', 'monitor_target.png')
                 if os.path.exists(monitor_img):
                     # stop previous monitor if any
                     try:
-                        if monitor_thread and monitor_thread.is_alive():
-                            monitor_thread.stop()
+                        if state.monitor_thread and state.monitor_thread.is_alive():
+                            state.monitor_thread.stop()
                     except Exception:
                         pass
                     def _stop_current():
                         try:
-                            ev_stop_execute_keyboard.set()
-                            ev_stop_execute_mouse.set()
+                            state.ev_stop_execute_keyboard.set()
+                            state.ev_stop_execute_mouse.set()
                         except Exception:
                             pass
                     def _restart_main():
                         # run restart.action once, then resume original main action
                         try:
-                            global can_start_listening, can_start_executing, pending_main_action, pending_main_playcount, restarting_flag, restart_back_job, action_file_name
-                            global current_run_interrupted, current_run_idx
-                            if restarting_flag:
+                            if state.restarting_flag:
                                 return
-                            restarting_flag = True
-                            pending_main_action = action_file_name
+                            state.restarting_flag = True
+                            state.pending_main_action = state.action_file_name
                             try:
-                                pending_main_playcount = playCount.get()
+                                state.pending_main_playcount = playCount.get()
                             except Exception:
-                                pending_main_playcount = None
-                            current_run_interrupted = True
-                            log_event(f"Run #{current_run_idx} interrupted -> restart.action")
+                                state.pending_main_playcount = None
+                            mark_interrupted("restart.action")
                             actionFileVar.set('restart.action')
 
                             def _replayer_busy():
                                 try:
-                                    return ('current_replayer' in globals() and current_replayer and
-                                            hasattr(current_replayer, '_runner') and current_replayer._runner is not None and
-                                            current_replayer._runner.is_alive())
+                                    runner = getattr(state.current_replayer, '_runner', None)
+                                    return runner is not None and runner.is_alive()
                                 except Exception:
                                     return False
 
-                            # wait until当前回放完全停止再启动restart，避免并行
+                            # wait until???????????? restart???????
                             def _launch_restart():
                                 try:
-                                    # allow re-run even if previous run hasn't fully reset
-                                    can_start_listening = True
-                                    can_start_executing = True
-                                    # 清理停止标记，避免下一轮立即退出
+                                    state.can_start_listening = True
+                                    state.can_start_executing = True
                                     try:
-                                        ev_stop_execute_keyboard.clear()
-                                        ev_stop_execute_mouse.clear()
+                                        state.ev_stop_execute_keyboard.clear()
+                                        state.ev_stop_execute_mouse.clear()
                                     except Exception:
                                         pass
                                     command_adapter('execute')
                                 except Exception:
                                     pass
 
-                            # 立即调度执行 restart.action，降低错过的概率
                             root.after(100, _launch_restart)
-                            # schedule hard switch back after 13s
-                            if restart_back_job:
+                            if state.restart_back_job:
                                 try:
-                                    root.after_cancel(restart_back_job)
+                                    root.after_cancel(state.restart_back_job)
                                 except Exception:
                                     pass
+
                             def _switch_back_from_restart():
-                                global pending_main_action, pending_main_playcount, restarting_flag, action_file_name, restart_back_job, can_start_listening, can_start_executing
-                                main_path = pending_main_action
-                                main_playcount = pending_main_playcount
-                                # request current restart run to stop
+                                main_path = state.pending_main_action
+                                main_playcount = state.pending_main_playcount
                                 try:
-                                    ev_stop_execute_keyboard.set()
-                                    ev_stop_execute_mouse.set()
+                                    state.ev_stop_execute_keyboard.set()
+                                    state.ev_stop_execute_mouse.set()
                                 except Exception:
                                     pass
-                                # resolve main path
                                 try:
                                     if main_path and (not os.path.exists(main_path)):
                                         cand = os.path.join('actions', os.path.basename(main_path))
@@ -527,47 +645,47 @@ def command_adapter(action):
                                             main_path = cand
                                 except Exception:
                                     pass
+
                                 def _resume_main():
-                                    global pending_main_action, pending_main_playcount, skip_run_increment, current_run_idx
                                     try:
                                         if not main_path:
-                                            pending_main_action = None
-                                            pending_main_playcount = None
-                                            restarting_flag = False
-                                            restart_back_job = None
-                                            can_start_listening = True
-                                            can_start_executing = True
+                                            state.pending_main_action = None
+                                            state.pending_main_playcount = None
+                                            state.restarting_flag = False
+                                            state.restart_back_job = None
+                                            state.can_start_listening = True
+                                            state.can_start_executing = True
                                             return
-                                        action_file_name = main_path
+                                        state.action_file_name = main_path
                                         actionFileVar.set(os.path.basename(main_path))
                                         if main_playcount not in (None, ''):
                                             playCount.set(int(main_playcount))
                                     except Exception:
                                         pass
                                     try:
-                                        ev_stop_execute_keyboard.clear()
-                                        ev_stop_execute_mouse.clear()
+                                        state.ev_stop_execute_keyboard.clear()
+                                        state.ev_stop_execute_mouse.clear()
                                     except Exception:
                                         pass
-                                    pending_main_action = None
-                                    pending_main_playcount = None
-                                    restarting_flag = False
-                                    restart_back_job = None
-                                    can_start_listening = True
-                                    can_start_executing = True
+                                    state.pending_main_action = None
+                                    state.pending_main_playcount = None
+                                    state.restarting_flag = False
+                                    state.restart_back_job = None
+                                    state.can_start_listening = True
+                                    state.can_start_executing = True
                                     try:
                                         def _do_resume():
-                                            global skip_run_increment
-                                            skip_run_increment = True
-                                            log_event(f"Run #{current_run_idx} resume after restart")
+                                            state.skip_run_increment = True
+                                            log_event(f"Run #{state.current_run_idx} resume after restart")
                                             command_adapter('execute')
-                                            skip_run_increment = False
+                                            state.skip_run_increment = False
                                         root.after(0, _do_resume)
                                     except Exception:
                                         pass
+
                                 def _wait_until_stopped(deadline=None):
                                     if deadline is None:
-                                        deadline = time.monotonic() + 3.0  # 最多等 3 秒
+                                        deadline = time.monotonic() + 3.0  # ?? 3 ?
                                     if (not _replayer_busy()) or time.monotonic() >= deadline:
                                         _resume_main()
                                     else:
@@ -576,14 +694,15 @@ def command_adapter(action):
                                         except Exception:
                                             pass
                                 _wait_until_stopped()
-                            restart_back_job = root.after(13000, _switch_back_from_restart)
+
+                            state.restart_back_job = root.after(13000, _switch_back_from_restart)
                         except Exception:
                             pass
                     try:
                         timeout_s = max(1.0, float(monitorTimeoutMs.get())/1000.0)
                     except Exception:
                         timeout_s = 240.0  # default 4 minutes
-                    monitor_thread = MonitorThread(
+                    state.monitor_thread = MonitorThread(
                         target_path=monitor_img,
                         timeout_s=timeout_s,
                         interval_s=3,       # check every 3s
@@ -591,16 +710,15 @@ def command_adapter(action):
                         restart_callback=_restart_main,
                         hit_callback=on_monitor_hit
                     )
-                    monitor_thread.start()
+                    state.monitor_thread.start()
 
                     # restart fallback handled inside monitor timeout flow
             except Exception:
                 pass
             # UI updates
-            update_ui_for_state(AppState.REPLAYING)
+            update_ui_for_state(UiState.REPLAYING)
             # start replayer (keyboard + mouse) and controller (ESC monitor)
             try:
-                global current_replayer
                 use_rel = False
                 try:
                     use_rel = bool(gameModeVar.get())
@@ -633,13 +751,19 @@ def command_adapter(action):
                         update_replay_loop_start(idx, total)
                     except Exception:
                         pass
-                current_replayer = Replayer(action_file_name, ev_stop_execute_keyboard, ev_stop_execute_mouse, ev_infinite_replay, execute_time_keyboard, use_rel, rel_gain, rel_auto, _on_progress, _on_loop_start)
-                current_replayer.start()
+                state.current_replayer = Replayer(state.action_file_name, state.ev_stop_execute_keyboard, state.ev_stop_execute_mouse, state.ev_infinite_replay, state.execute_time_keyboard, use_rel, rel_gain, rel_auto, _on_progress, _on_loop_start)
+                state.current_replayer.start()
             except Exception:
                 pass
             ExecuteController().start()
-            can_start_listening = False
-            can_start_executing = False
+            state.can_start_listening = False
+            state.can_start_executing = False
+    else:
+        # 防御：记录无法启动的原因，便于排查“第二次不播放”
+        try:
+            log_event(f"Skip action '{action}': busy (state.can_start_listening={state.can_start_listening}, state.can_start_executing={state.can_start_executing})")
+        except Exception:
+            pass
 
 
 ######################################################################
@@ -656,25 +780,21 @@ class ListenController(threading.Thread):
         self.daemon = True
 
     def run(self):
-        global ev_stop_listen
         try:
-            ev_stop_listen.clear()
+            state.ev_stop_listen.clear()
         except Exception:
             pass
         
         def on_release(key):
-            global can_start_listening 
-            global can_start_executing
-            global ev_stop_listen
             
             if key == keyboard.Key.esc:
                 try:
-                    ev_stop_listen.set()
+                    state.ev_stop_listen.set()
                 except Exception:
                     pass
-                can_start_listening = True
-                can_start_executing = True
-                update_ui_for_state(AppState.IDLE)
+                state.can_start_listening = True
+                state.can_start_executing = True
+                update_ui_for_state(UiState.IDLE)
                 keyboardListener.stop()
 
         with keyboard.Listener(on_release=on_release) as keyboardListener:
@@ -687,11 +807,6 @@ class ExecuteController(threading.Thread):
         self.daemon = True
 
     def run(self):
-        global ev_stop_execute_keyboard
-        global ev_stop_execute_mouse
-        global can_start_listening 
-        global can_start_executing
-        global current_run_idx, current_run_action, current_run_interrupted, skip_run_increment, restarting_flag, pending_main_playcount
 
         def on_release(key):
             return
@@ -700,7 +815,7 @@ class ExecuteController(threading.Thread):
         keyboardListener.start()
 
         # Wait until all active workers have finished (or ESC pressed)
-        while not (ev_stop_execute_keyboard.is_set() and ev_stop_execute_mouse.is_set()):
+        while not (state.ev_stop_execute_keyboard.is_set() and state.ev_stop_execute_mouse.is_set()):
             time.sleep(0.05)
 
         # Safety: release any stuck inputs
@@ -708,22 +823,21 @@ class ExecuteController(threading.Thread):
         log_event("Replay stopped")
 
         # Reset UI and states once everything is done
-        can_start_listening = True
-        can_start_executing = True
-        update_ui_for_state(AppState.IDLE)
+        state.can_start_listening = True
+        state.can_start_executing = True
+        update_ui_for_state(UiState.IDLE)
         # If restart.action just finished, auto resume pending main action
         try:
-            global restarting_flag, pending_main_action, pending_main_playcount, skip_run_increment, current_run_idx, current_run_action
-            base_name = os.path.basename(action_file_name) if 'action_file_name' in globals() else ''
-            if not restarting_flag:
-                log_event(f"Run #{current_run_idx} finished: {current_run_action}")
-            if restarting_flag and pending_main_action and base_name.lower() == 'restart.action':
+            base_name = os.path.basename(state.action_file_name) if state.action_file_name else ''
+            if not state.restarting_flag:
+                mark_finished()
+            if state.restarting_flag and state.pending_main_action and base_name.lower() == 'restart.action':
                 log_event("Restart finished, resuming main script")
-                next_action = pending_main_action
-                next_count = pending_main_playcount
-                pending_main_action = None
-                pending_main_playcount = None
-                restarting_flag = False
+                next_action = state.pending_main_action
+                next_count = state.pending_main_playcount
+                state.pending_main_action = None
+                state.pending_main_playcount = None
+                state.restarting_flag = False
                 # resolve path for main action and set globals/selection
                 try:
                     main_path = next_action
@@ -731,7 +845,7 @@ class ExecuteController(threading.Thread):
                         candidate = os.path.join('actions', os.path.basename(next_action))
                         if os.path.exists(candidate):
                             main_path = candidate
-                    action_file_name = main_path
+                    state.action_file_name = main_path
                     actionFileVar.set(os.path.basename(main_path))
                     if next_count not in (None, ''):
                         playCount.set(int(next_count))
@@ -739,20 +853,19 @@ class ExecuteController(threading.Thread):
                     pass
                 # ensure stop events are cleared for next run
                 try:
-                    ev_stop_execute_keyboard.clear()
-                    ev_stop_execute_mouse.clear()
+                    state.ev_stop_execute_keyboard.clear()
+                    state.ev_stop_execute_mouse.clear()
                 except Exception:
                     pass
-                can_start_listening = True
-                can_start_executing = True
+                state.can_start_listening = True
+                state.can_start_executing = True
                 # kick off main action on UI thread without incrementing run counter
                 def _do_resume():
-                    global skip_run_increment, current_run_interrupted
-                    skip_run_increment = True
-                    current_run_interrupted = False
-                    log_event(f"Run #{current_run_idx} resume after restart")
+                    state.skip_run_increment = True
+                    state.current_run_interrupted = False
+                    log_event(f"Run #{state.current_run_idx} resume after restart")
                     command_adapter('execute')
-                    skip_run_increment = False
+                    state.skip_run_increment = False
                 root.after(0, _do_resume)
         except Exception:
             pass
@@ -769,10 +882,9 @@ class HotkeyController(threading.Thread):
 
     def run(self):
         def toggle_record():
-            global can_start_listening, can_start_executing
-            global root, ev_stop_listen
+            global root
             # if idle, start recording; else stop via ESC
-            if can_start_listening and can_start_executing:
+            if state.can_start_listening and state.can_start_executing:
                 log_event("Recording requested (F10)")
                 try:
                     # schedule on Tk main thread to avoid cross-thread UI ops
@@ -782,24 +894,22 @@ class HotkeyController(threading.Thread):
             else:
                 # do NOT inject ESC; directly signal recorder to stop
                 try:
-                    ev_stop_listen.set()
+                    state.ev_stop_listen.set()
                 except Exception:
                     pass
                 # reset UI state immediately
                 try:
-                    can_start_listening = True
-                    can_start_executing = True
-                    root.after(0, lambda: update_ui_for_state(AppState.IDLE))
+                    state.can_start_listening = True
+                    state.can_start_executing = True
+                    root.after(0, lambda: update_ui_for_state(UiState.IDLE))
                 except Exception:
                     pass
                 log_event("Recording stopped")
 
         def toggle_replay():
-            global can_start_listening, can_start_executing
-            global ev_stop_execute_keyboard, ev_stop_execute_mouse
             global root
             # if idle, start replay; else request stop
-            if can_start_listening and can_start_executing:
+            if state.can_start_listening and state.can_start_executing:
                 log_event("Replay requested (F11)")
                 try:
                     # schedule on Tk main thread to avoid cross-thread UI ops
@@ -809,9 +919,9 @@ class HotkeyController(threading.Thread):
             else:
                 log_event("Replay stop requested")
                 try:
-                    ev_stop_execute_keyboard.set()
-                    ev_stop_execute_mouse.set()
-                    root.after(0, lambda: update_ui_for_state(AppState.IDLE))
+                    state.ev_stop_execute_keyboard.set()
+                    state.ev_stop_execute_mouse.set()
+                    root.after(0, lambda: update_ui_for_state(UiState.IDLE))
                 except Exception:
                     pass
         
@@ -854,17 +964,17 @@ if __name__ == '__main__':
     # Ensure DPI awareness before creating Tk to avoid window size jumps
     set_process_dpi_aware()
 
-    can_start_listening = True
-    can_start_executing = True
-    execute_time_keyboard = 0
-    execute_time_mouse = 0
+    state.can_start_listening = True
+    state.can_start_executing = True
+    state.execute_time_keyboard = 0
+    state.execute_time_mouse = 0
     # threading Events for coordination
-    ev_stop_execute_keyboard = threading.Event(); ev_stop_execute_keyboard.set()
-    ev_stop_execute_mouse = threading.Event(); ev_stop_execute_mouse.set()
-    ev_stop_listen = threading.Event(); ev_stop_listen.set()
-    ev_infinite_replay = threading.Event(); ev_infinite_replay.clear()
-    pressed_vks = set()
-    pressed_mouse_buttons = set()
+    state.ev_stop_execute_keyboard = threading.Event(); state.ev_stop_execute_keyboard.set()
+    state.ev_stop_execute_mouse = threading.Event(); state.ev_stop_execute_mouse.set()
+    state.ev_stop_listen = threading.Event(); state.ev_stop_listen.set()
+    state.ev_infinite_replay = threading.Event(); state.ev_infinite_replay.clear()
+    state.pressed_vks = set()
+    state.pressed_mouse_buttons = set()
     
     root = tkinter.Tk()
 
@@ -1014,20 +1124,22 @@ if __name__ == '__main__':
     dungeonTimeLabel = ttk.Label(monitorCard, text='Dungeon time: 0.0s', style='CardLabel.TLabel')
     dungeonTimeLabel.place(x=12, y=70, width=250, height=24)
     # Monitor state & helpers
-    monitor_total_loops = 0
-    monitor_completed_loops = 0
-    monitor_loop_start_ts = None
-    monitor_timer_job = None
-    monitor_total_time_s = 0.0
-    dungeon_start_ts = None
-    current_run_idx = 0
-    current_run_action = ''
-    current_run_interrupted = False
-    skip_run_increment = False
-    current_run_idx = 0
-    current_run_action = ''
-    current_run_interrupted = False
-    skip_run_increment = False
+    state.monitor_total_loops = 0
+    state.monitor_completed_loops = 0
+    state.monitor_loop_start_ts = None
+    state.monitor_timer_job = None
+    state.monitor_total_time_s = 0.0
+    state.dungeon_start_ts = None
+    state.current_run_idx = 0
+    state.current_run_action = ''
+    state.current_run_interrupted = False
+    state.skip_run_increment = False
+    recording_controller = None
+    playback_controller = None
+    state.current_run_idx = 0
+    state.current_run_action = ''
+    state.current_run_interrupted = False
+    state.skip_run_increment = False
     def log_event(msg: str):
         try:
             ts = datetime.now().strftime('%H:%M:%S')
@@ -1038,124 +1150,143 @@ if __name__ == '__main__':
         except Exception:
             pass
 
+    # Run bookkeeping helpers
+    def begin_run(action_path: str, resume: bool = False):
+        """记录一次新的播放或恢复"""
+        name = os.path.basename(action_path) if action_path else ''
+        if resume:
+            state.skip_run_increment = False
+            state.current_run_action = state.current_run_action or name
+            state.current_run_interrupted = False
+            log_event(f"Run #{state.current_run_idx} resume: {state.current_run_action}")
+            return
+        state.current_run_idx += 1
+        state.current_run_action = name
+        state.current_run_interrupted = False
+        log_event(f"Run #{state.current_run_idx} start: {state.current_run_action}")
+
+    def mark_interrupted(reason: str = ''):
+        """标记当前 run 被中断"""
+        state.current_run_interrupted = True
+        log_event(f"Run #{state.current_run_idx} interrupted{': ' + reason if reason else ''}")
+
+    def mark_finished():
+        """标记正常结束"""
+        if not state.current_run_interrupted:
+            log_event(f"Run #{state.current_run_idx} finished: {state.current_run_action}")
+
     def update_monitor_labels():
         try:
-            loops_text = f"Loops: {monitor_completed_loops}/{monitor_total_loops}" if monitor_total_loops else "Loops: 0/0"
+            loops_text = f"Loops: {state.monitor_completed_loops}/{state.monitor_total_loops}" if state.monitor_total_loops else "Loops: 0/0"
             monitorLoopLabel['text'] = loops_text
             elapsed = 0.0
-            if monitor_loop_start_ts is not None:
-                elapsed = max(0.0, time.monotonic() - monitor_loop_start_ts)
+            if state.monitor_loop_start_ts is not None:
+                elapsed = max(0.0, time.monotonic() - state.monitor_loop_start_ts)
             monitorTimeLabel['text'] = f"Current loop time: {elapsed:.1f}s"
-            monitorTotalLabel['text'] = f"Total loop time: {monitor_total_time_s:.1f}s"
+            monitorTotalLabel['text'] = f"Total loop time: {state.monitor_total_time_s:.1f}s"
             dungeon_elapsed = 0.0
-            if dungeon_start_ts is not None:
-                dungeon_elapsed = max(0.0, time.monotonic() - dungeon_start_ts)
+            if state.dungeon_start_ts is not None:
+                dungeon_elapsed = max(0.0, time.monotonic() - state.dungeon_start_ts)
             dungeonTimeLabel['text'] = f"Dungeon time: {dungeon_elapsed:.1f}s"
         except Exception:
             pass
 
     def _tick_monitor():
-        global monitor_timer_job
         update_monitor_labels()
         try:
-            monitor_timer_job = root.after(200, _tick_monitor)
+            state.monitor_timer_job = root.after(200, _tick_monitor)
         except Exception:
-            monitor_timer_job = None
+            state.monitor_timer_job = None
 
     def start_monitor(total_loops: int, total_time_s: float = 0.0):
-        global monitor_total_loops, monitor_completed_loops, monitor_loop_start_ts, monitor_timer_job, monitor_total_time_s, dungeon_start_ts
-        monitor_total_loops = max(1, int(total_loops or 1))
-        monitor_completed_loops = 0
-        monitor_loop_start_ts = time.monotonic()
-        dungeon_start_ts = None
+        state.monitor_total_loops = max(1, int(total_loops or 1))
+        state.monitor_completed_loops = 0
+        state.monitor_loop_start_ts = time.monotonic()
+        state.dungeon_start_ts = None
         try:
-            monitor_total_time_s = max(0.0, float(total_time_s or 0.0))
+            state.monitor_total_time_s = max(0.0, float(total_time_s or 0.0))
         except Exception:
-            monitor_total_time_s = 0.0
-        if monitor_timer_job:
+            state.monitor_total_time_s = 0.0
+        if state.monitor_timer_job:
             try:
-                root.after_cancel(monitor_timer_job)
+                root.after_cancel(state.monitor_timer_job)
             except Exception:
                 pass
-            monitor_timer_job = None
+            state.monitor_timer_job = None
         update_monitor_labels()
         _tick_monitor()
 
     def update_replay_progress(done: int, total: int):
-        global monitor_completed_loops, monitor_total_loops, monitor_loop_start_ts
         try:
-            monitor_completed_loops = int(done or 0)
+            state.monitor_completed_loops = int(done or 0)
         except Exception:
-            monitor_completed_loops = done
+            state.monitor_completed_loops = done
         try:
             if total:
-                monitor_total_loops = int(total)
+                state.monitor_total_loops = int(total)
         except Exception:
             pass
         update_monitor_labels()
 
     def update_replay_loop_start(loop_idx: int, total: int):
-        global monitor_loop_start_ts, monitor_total_loops
         try:
-            monitor_total_loops = int(total or monitor_total_loops or 0)
+            state.monitor_total_loops = int(total or state.monitor_total_loops or 0)
         except Exception:
             pass
-        monitor_loop_start_ts = time.monotonic()
+        state.monitor_loop_start_ts = time.monotonic()
         update_monitor_labels()
 
     # Monitor thread handle
-    monitor_thread = None
-    pending_main_action = None
-    pending_main_playcount = None
-    restarting_flag = False
-    restart_back_job = None
+    state.monitor_thread = None
+    state.pending_main_action = None
+    state.pending_main_playcount = None
+    state.restarting_flag = False
+    state.restart_back_job = None
 
     def on_monitor_hit():
         # mark dungeon start at first detection of target image
-        global dungeon_start_ts
-        dungeon_start_ts = time.monotonic()
+        state.dungeon_start_ts = time.monotonic()
         update_monitor_labels()
 
     def reset_monitor():
-        global monitor_total_loops, monitor_completed_loops, monitor_loop_start_ts, monitor_timer_job, dungeon_start_ts
-        monitor_total_loops = 0
-        monitor_completed_loops = 0
-        monitor_loop_start_ts = None
-        dungeon_start_ts = None
-        if monitor_timer_job:
+        state.monitor_total_loops = 0
+        state.monitor_completed_loops = 0
+        state.monitor_loop_start_ts = None
+        state.dungeon_start_ts = None
+        if state.monitor_timer_job:
             try:
-                root.after_cancel(monitor_timer_job)
+                root.after_cancel(state.monitor_timer_job)
             except Exception:
                 pass
-            monitor_timer_job = None
+            state.monitor_timer_job = None
         update_monitor_labels()
 
     # UI state helper
-    class AppState:
+    class UiState:
         IDLE = 'idle'
         RECORDING = 'recording'
         REPLAYING = 'replaying'
 
-    def update_ui_for_state(state: str):
-        if state == AppState.IDLE:
+    def update_ui_for_state(ui_state: str):
+        if ui_state == UiState.IDLE:
             startListenerBtn.state(['!disabled'])
             startExecuteBtn.state(['!disabled'])
             startListenerBtn['text'] = 'Start recording (F10)'
             startExecuteBtn['text'] = 'Start replaying (F11)'
             reset_monitor()
-        elif state == AppState.RECORDING:
+        elif ui_state == UiState.RECORDING:
             startListenerBtn.state(['disabled'])
             startExecuteBtn.state(['disabled'])
             startListenerBtn['text'] = 'Recording, "F10" to stop.'
-        elif state == AppState.REPLAYING:
+        elif ui_state == UiState.REPLAYING:
             startListenerBtn.state(['disabled'])
             startExecuteBtn.state(['disabled'])
             startExecuteBtn['text'] = 'Replaying, "F11" to stop.'
         # ensure monitor thread is stopped when exiting replay
-        if state == AppState.IDLE:
+        if ui_state == UiState.IDLE:
             try:
-                if 'monitor_thread' in globals() and monitor_thread:
-                    monitor_thread.stop()
+                if state.monitor_thread:
+                    state.monitor_thread.stop()
             except Exception:
                 pass
         try:
@@ -1261,7 +1392,7 @@ if __name__ == '__main__':
 
     def open_action_editor():
         # Prevent editing while recording/replaying
-        if not (can_start_listening and can_start_executing):
+        if not (state.can_start_listening and state.can_start_executing):
             messagebox.showwarning('Busy', 'Please stop recording/replaying before editing.')
             return
         path = resolve_selected_action_path()
@@ -1885,11 +2016,10 @@ if __name__ == '__main__':
 
     # Ensure closing window terminates app
     def on_close():
-        global ev_stop_execute_keyboard, ev_stop_execute_mouse, ev_stop_listen
         try:
-            ev_stop_execute_keyboard.set()
-            ev_stop_execute_mouse.set()
-            ev_stop_listen.set()
+            state.ev_stop_execute_keyboard.set()
+            state.ev_stop_execute_mouse.set()
+            state.ev_stop_listen.set()
         except Exception:
             pass
         try:
