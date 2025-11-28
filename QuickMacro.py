@@ -294,6 +294,29 @@ class AppService:
             self._log('Please select an action file.')
             return
         action_path = self._resolve_action_path(name)
+        # If a .rule file is selected, load rules and switch to configured main action
+        if name.lower().endswith('.rule'):
+            try:
+                rule_data = load_rules(action_path)
+                rules_body = rule_data.get('rules') if isinstance(rule_data, dict) else rule_data
+                if rules_body:
+                    self.rule_engine.set_rules(rules_body)
+                    if callable(self._log):
+                        self._log(f"Loaded rules from {name}")
+                main_action = ''
+                if isinstance(rule_data, dict):
+                    for k in ('action', 'main_action', 'start_action'):
+                        if rule_data.get(k):
+                            main_action = str(rule_data.get(k))
+                            break
+                if not main_action:
+                    self._log('Rule file missing main action; abort.')
+                    return
+                name = main_action.strip()
+                action_path = self._resolve_action_path(name)
+            except Exception:
+                self._log('Failed to load rule file; abort.')
+                return
         if not action_path:
             self._log('Action file not found.')
             return
@@ -761,12 +784,13 @@ def ensure_actions_dir():
     return p
 
 def list_action_files():
-    # Prefer files under actions/; if none, fall back to root
+    # Prefer files under actions/; include .action and .rule
     actions_dir = ensure_actions_dir()
-    files = sorted(str(f.name) for f in actions_dir.glob('*.action'))
+    files = sorted(str(f.name) for f in actions_dir.glob('*.action')) + sorted(str(f.name) for f in actions_dir.glob('*.rule'))
     if files:
         return files
-    return sorted(glob.glob('*.action'))
+    root_files = sorted(glob.glob('*.action')) + sorted(glob.glob('*.rule'))
+    return root_files
 
 def init_new_action_file():
     # Create a new action file with timestamp-based name and header/meta
