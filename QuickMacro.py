@@ -208,6 +208,40 @@ class AppService:
         self._execute_controller_factory = execute_controller_factory
         self.action_registry = ActionRegistry()
         self.rule_engine = RuleEngine(self.event_hub, runner=None, registry=self.action_registry, rules={})
+    def start_record(self):
+        if not (self.state.can_start_listening and self.state.can_start_executing):
+            return
+        if self.recording_controller:
+            self.recording_controller.start()
+        try:
+            if self.listen_controller:
+                if not self.listen_controller.is_alive():
+                    self.listen_controller.start()
+            else:
+                self.listen_controller = ListenController(self.state, ui_refs)
+                self.listen_controller.start()
+        except Exception:
+            pass
+        self.state.can_start_listening = False
+        self.state.can_start_executing = False
+        if callable(self.hooks.get('update_ui_for_state')):
+            try:
+                self.hooks.get('update_ui_for_state')(UiState.RECORDING)
+            except Exception:
+                pass
+    def stop_record(self):
+        if self.recording_controller:
+            try:
+                self.recording_controller.stop()
+            except Exception:
+                pass
+        self.state.can_start_listening = True
+        self.state.can_start_executing = True
+        if callable(self.hooks.get('update_ui_for_state')):
+            try:
+                self.hooks.get('update_ui_for_state')(UiState.IDLE)
+            except Exception:
+                pass
         # runner init deferred until class is defined below
 
     def _log(self, msg: str):
@@ -487,10 +521,12 @@ class ActionRunner:
         if self.recording_controller:
             self.recording_controller.start()
         try:
-            if self.listen_controller and self.listen_controller.is_alive():
-                pass
+            if self.listen_controller:
+                if not self.listen_controller.is_alive():
+                    self.listen_controller.start()
             else:
-                self.listen_controller = ListenController(self.state, ui_refs)
+                # fallback: start a lightweight listener without ui_refs to capture ESC
+                self.listen_controller = ListenController(self.state, None)
                 self.listen_controller.start()
         except Exception:
             pass
