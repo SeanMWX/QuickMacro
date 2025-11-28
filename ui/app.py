@@ -374,16 +374,6 @@ def run_app(qm):
             state.monitor_timer_job = None
         update_monitor_labels()
 
-    # Override action editor with component-based implementation
-    def open_action_editor():
-        if not (state.can_start_listening and state.can_start_executing):
-            messagebox.showwarning('Busy', 'Please stop recording/replaying before editing.')
-            return
-        name = actionFileVar.get().strip()
-        if not name:
-            messagebox.showinfo('No file', 'Please select an .action file first.')
-            return
-        component_open_action_editor(root, state, name, refresh_restart_timeout_from_selection)
     # UI state helper
     class UiState:
         IDLE = 'idle'
@@ -487,6 +477,7 @@ def run_app(qm):
             'begin_run': begin_run,
             'mark_interrupted': mark_interrupted,
             'mark_finished': mark_finished,
+            'on_monitor_hit': on_monitor_hit,
         },
         replay_params_provider=_get_replay_params
     )
@@ -594,6 +585,16 @@ def run_app(qm):
                     subprocess.Popen(['xdg-open', actions_dir])
         except Exception:
             pass
+
+    def open_action_editor():
+        if not (state.can_start_listening and state.can_start_executing):
+            messagebox.showwarning('Busy', 'Please stop recording/replaying before editing.')
+            return
+        name = actionFileVar.get().strip()
+        if not name:
+            messagebox.showinfo('No file', 'Please select an .action file first.')
+            return
+        component_open_action_editor(root, state, name, refresh_restart_timeout_from_selection)
     
     def open_action_editor():
         # Prevent editing while recording/replaying

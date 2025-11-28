@@ -119,6 +119,7 @@ class AppService:
         self.hooks = hooks or {}
         self.replay_params_provider = replay_params_provider
         self.last_replay_params = None
+        self._on_monitor_hit = self.hooks.get('on_monitor_hit')
 
     def _log(self, msg: str):
         try:
@@ -265,7 +266,7 @@ class AppService:
                     interval_s=3,
                     stop_callbacks=[_stop_current],
                     restart_callback=_restart_main,
-                    hit_callback=on_monitor_hit
+                    hit_callback=self._on_monitor_hit
                 )
                 self.state.monitor_thread.start()
         except Exception:
