@@ -77,8 +77,6 @@ class UIRefs:
     root: object
     actionFileVar: object
     actionFileSelect: object
-    startExecuteBtn: object
-    startListenerBtn: object
     playCount: object
     infiniteRepeatVar: object
     gameModeVar: object
@@ -91,8 +89,6 @@ class UIRefs:
     mark_finished: object
     recording_controller: object
     playback_controller: object
-    listen_controller: object
-    execute_controller: object
     listen_controller: object
     execute_controller: object
 

@@ -441,8 +441,6 @@ def run_app(qm):
         root=root,
         actionFileVar=actionFileVar,
         actionFileSelect=actionFileSelect,
-        startExecuteBtn=startExecuteBtn,
-        startListenerBtn=startListenerBtn,
         playCount=playCount,
         infiniteRepeatVar=infiniteRepeatVar,
         gameModeVar=gameModeVar,
