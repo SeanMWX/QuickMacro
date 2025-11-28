@@ -33,6 +33,25 @@ from controllers.hotkeys import HotkeyController
 from controllers.listen import ListenController
 from controllers.execute import ExecuteController
 
+######################################################################
+# Event hub
+######################################################################
+class EventHub:
+    def __init__(self):
+        self._handlers = {}
+
+    def on(self, event: str, handler):
+        if not event or handler is None:
+            return
+        self._handlers.setdefault(event, []).append(handler)
+
+    def emit(self, event: str, **kwargs):
+        for h in list(self._handlers.get(event, [])):
+            try:
+                h(**kwargs)
+            except Exception:
+                pass
+
 @dataclass
 class AppState:
     can_start_listening: bool = True
@@ -102,7 +121,7 @@ class UiState:
 # Service layer
 ######################################################################
 class AppService:
-    def __init__(self, state: AppState, recording_controller, playback_controller, listen_controller, execute_controller, *, start_monitor, compute_action_total_ms, get_restart_timeout_ms, release_all_inputs, hooks: dict, replay_params_provider):
+    def __init__(self, state: AppState, recording_controller, playback_controller, listen_controller, execute_controller, *, start_monitor, compute_action_total_ms, get_restart_timeout_ms, release_all_inputs, hooks: dict, replay_params_provider, execute_controller_factory=None, event_hub=None):
         self.state = state
         self.recording_controller = recording_controller
         self.playback_controller = playback_controller
@@ -116,6 +135,9 @@ class AppService:
         self.replay_params_provider = replay_params_provider
         self.last_replay_params = None
         self._on_monitor_hit = self.hooks.get('on_monitor_hit')
+        self.event_hub = event_hub or EventHub()
+        self._execute_controller_factory = execute_controller_factory
+        # runner init deferred until class is defined below
 
     def _log(self, msg: str):
         try:
@@ -146,6 +168,230 @@ class AppService:
             return ''
         sel_path = os.path.join('actions', name)
         return sel_path if os.path.exists(sel_path) else name
+
+    def _ensure_execute_controller(self):
+        if self.execute_controller and self.execute_controller.is_alive():
+            return self.execute_controller
+        if callable(self._execute_controller_factory):
+            self.execute_controller = self._execute_controller_factory()
+            return self.execute_controller
+        return None
+
+    def start_replay(self, params: dict = None, *, resume: bool = False):
+        if not (self.state.can_start_listening and self.state.can_start_executing):
+            return
+        if params is None and self.replay_params_provider:
+            params = self.replay_params_provider()
+        if not params:
+            return
+        name = (params.get('action') or '').strip()
+        if not name:
+            self._log('Please select an action file.')
+            return
+        action_path = self._resolve_action_path(name)
+        if not action_path:
+            self._log('Action file not found.')
+            return
+        self.last_replay_params = params
+        if not hasattr(self, 'runner') or self.runner is None:
+            self.runner = ActionRunner(
+                state=self.state,
+                playback_controller=self.playback_controller,
+                start_monitor=self.start_monitor_fn,
+                compute_action_total_ms=self.compute_action_total_ms,
+                get_restart_timeout_ms=self.get_restart_timeout_ms,
+                release_all_inputs=self.release_all_inputs,
+                execute_controller_supplier=self._ensure_execute_controller,
+                hooks=self.hooks,
+                event_hub=self.event_hub,
+            )
+        self.runner.start(action_path, params, resume=resume)
+
+    def stop_replay(self):
+        if hasattr(self, 'runner') and self.runner:
+            self.runner.stop()
+
+    def toggle_record(self):
+        if self.state.can_start_listening and self.state.can_start_executing:
+            self.start_record()
+        else:
+            self.stop_record()
+
+    def toggle_replay(self):
+        if self.state.can_start_listening and self.state.can_start_executing:
+            params = self.replay_params_provider() if self.replay_params_provider else None
+            self.start_replay(params)
+        else:
+            self.stop_replay()
+
+
+class ActionRunner:
+    def __init__(self, state: AppState, playback_controller, start_monitor, compute_action_total_ms, get_restart_timeout_ms, release_all_inputs, execute_controller_supplier, hooks: dict, event_hub: EventHub):
+        self.state = state
+        self.playback_controller = playback_controller
+        self.start_monitor = start_monitor
+        self.compute_action_total_ms = compute_action_total_ms
+        self.get_restart_timeout_ms = get_restart_timeout_ms
+        self.release_all_inputs = release_all_inputs
+        self.execute_controller_supplier = execute_controller_supplier
+        self.hooks = hooks or {}
+        self.event_hub = event_hub or EventHub()
+        self._log = self.hooks.get('log_event')
+        self._update_ui = self.hooks.get('update_ui_for_state')
+        self._begin_run = self.hooks.get('begin_run')
+        self._mark_interrupted = self.hooks.get('mark_interrupted')
+        self._mark_finished = self.hooks.get('mark_finished')
+        self._on_monitor_hit = self.hooks.get('on_monitor_hit')
+
+    def start(self, action_path: str, params: dict, resume: bool = False):
+        state = self.state
+        state.action_file_name = action_path
+        try:
+            state.restart_timeout_ms = self.get_restart_timeout_ms(action_path)
+        except Exception:
+            state.restart_timeout_ms = 3600000
+        if not state.skip_run_increment:
+            if callable(self._begin_run):
+                self._begin_run(state.action_file_name, resume=False)
+        else:
+            if callable(self._begin_run):
+                self._begin_run(state.action_file_name, resume=True)
+            state.skip_run_increment = False
+        try:
+            if os.path.basename(state.action_file_name).lower() != 'restart.action':
+                state.restarting_flag = False
+        except Exception:
+            pass
+        try:
+            if params.get('infinite'):
+                state.ev_infinite_replay.set()
+            else:
+                state.ev_infinite_replay.clear()
+        except Exception:
+            pass
+        try:
+            repeat = int(params.get('repeat') or 1)
+        except Exception:
+            repeat = 1
+        state.execute_time_keyboard = repeat
+        state.execute_time_mouse = repeat
+        try:
+            state.ev_stop_execute_keyboard.clear()
+            state.ev_stop_execute_mouse.clear()
+        except Exception:
+            pass
+        try:
+            self.release_all_inputs()
+        except Exception:
+            pass
+        total_ms = 0
+        try:
+            total_ms = self.compute_action_total_ms(state.action_file_name)
+        except Exception:
+            total_ms = 0
+        try:
+            self.start_monitor(repeat, total_ms/1000.0)
+        except Exception:
+            pass
+        try:
+            monitor_img = os.path.join('assets', 'monitor_target.png')
+            if os.path.exists(monitor_img):
+                try:
+                    if state.monitor_thread and state.monitor_thread.is_alive():
+                        state.monitor_thread.stop()
+                except Exception:
+                    pass
+                def _stop_current():
+                    try:
+                        state.ev_stop_execute_keyboard.set()
+                        state.ev_stop_execute_mouse.set()
+                    except Exception:
+                        pass
+                def _restart_main():
+                    try:
+                        if state.restarting_flag or state.restart_running:
+                            return
+                        state.restarting_flag = True
+                        state.pending_main_action = state.action_file_name
+                        state.pending_main_playcount = repeat
+                        state.ev_stop_execute_keyboard.set()
+                        state.ev_stop_execute_mouse.set()
+                    except Exception:
+                        pass
+                try:
+                    timeout_s = max(1.0, float(state.restart_timeout_ms)/1000.0)
+                except Exception:
+                    timeout_s = 3600.0
+                state.monitor_thread = MonitorThread(
+                    target_path=monitor_img,
+                    timeout_s=timeout_s,
+                    interval_s=3,
+                    stop_callbacks=[_stop_current],
+                    restart_callback=_restart_main,
+                    hit_callback=self._on_monitor_hit
+                )
+                state.monitor_thread.start()
+        except Exception:
+            pass
+        if callable(self._update_ui):
+            self._update_ui(UiState.REPLAYING)
+        try:
+            use_rel = bool(params.get('use_rel'))
+        except Exception:
+            use_rel = False
+        try:
+            rel_gain = float(params.get('rel_gain', 1.0) or 1.0)
+        except Exception:
+            rel_gain = 1.0
+        try:
+            rel_auto = bool(params.get('rel_auto', True))
+        except Exception:
+            rel_auto = True
+        if self.playback_controller:
+            try:
+                self.playback_controller.start(
+                    state.action_file_name,
+                    repeat,
+                    infinite=bool(params.get('infinite')),
+                    use_rel=use_rel,
+                    rel_gain=rel_gain,
+                    rel_auto=rel_auto,
+                    total_ms=total_ms
+                )
+            except Exception:
+                pass
+        try:
+            ctrl = self.execute_controller_supplier() if callable(self.execute_controller_supplier) else None
+            if ctrl and not ctrl.is_alive():
+                ctrl.start()
+        except Exception:
+            pass
+        state.can_start_listening = False
+        state.can_start_executing = False
+        try:
+            self.event_hub.emit('replay_started', action=state.action_file_name, repeat=repeat)
+        except Exception:
+            pass
+
+    def stop(self):
+        try:
+            self.state.ev_stop_execute_keyboard.set()
+            self.state.ev_stop_execute_mouse.set()
+        except Exception:
+            pass
+        self.state.can_start_listening = True
+        self.state.can_start_executing = True
+        try:
+            if callable(self._update_ui):
+                self._update_ui(UiState.IDLE)
+        except Exception:
+            pass
+        if callable(self._log):
+            self._log("Replay stop requested")
+        try:
+            self.event_hub.emit('replay_stopped', action=self.state.action_file_name)
+        except Exception:
+            pass
 
     def start_record(self):
         if not (self.state.can_start_listening and self.state.can_start_executing):

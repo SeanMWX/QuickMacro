@@ -477,7 +477,8 @@ def run_app(qm):
             'mark_finished': mark_finished,
             'on_monitor_hit': on_monitor_hit,
         },
-        replay_params_provider=_get_replay_params
+        replay_params_provider=_get_replay_params,
+        execute_controller_factory=lambda: ExecuteController(state, qm.ui_refs, command_adapter, release_all_inputs),
     )
     qm.app_service = app_service
 
