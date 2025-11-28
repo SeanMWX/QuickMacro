@@ -72,7 +72,9 @@ class RuleEngine:
         self.registry = registry or ActionRegistry()
         self.rules = rules or {}
         self.last_params = None
-        self.event_hub.on('monitor_hit', self._on_monitor_hit)
+        # Subscribe to known events
+        self.event_hub.on('monitor_hit', lambda **kw: self.dispatch('monitor_hit', kw))
+        self.event_hub.on('monitor_timeout', lambda **kw: self.dispatch('monitor_timeout', kw))
 
     def update_context(self, params: dict):
         try:
@@ -80,18 +82,34 @@ class RuleEngine:
         except Exception:
             self.last_params = None
 
-    def _on_monitor_hit(self, **_):
-        action_name = self.rules.get('monitor_hit')
-        if not action_name or not self.runner:
+    def set_rules(self, rules: dict):
+        try:
+            self.rules = dict(rules or {})
+        except Exception:
+            self.rules = {}
+
+    def dispatch(self, event_name: str, payload: dict = None):
+        if not event_name or not self.runner:
+            return
+        rule = self.rules.get(event_name)
+        if not rule:
+            return
+        if isinstance(rule, str):
+            action_name = rule
+            overrides = {}
+        elif isinstance(rule, dict):
+            action_name = rule.get('action') or ''
+            overrides = {k:v for k,v in rule.items() if k != 'action'}
+        else:
             return
         path = self.registry.resolve(action_name)
         if not path:
             return
         params = dict(self.last_params or {})
+        params.update(overrides)
         params['action'] = action_name
         if not params.get('repeat'):
             params['repeat'] = 1
-        params['infinite'] = False
         try:
             self.runner.start(path, params, resume=False)
         except Exception:
@@ -357,6 +375,10 @@ class ActionRunner:
                     except Exception:
                         pass
                 def _restart_main():
+                    try:
+                        self.event_hub.emit('monitor_timeout', action=state.action_file_name)
+                    except Exception:
+                        pass
                     try:
                         if state.restarting_flag or state.restart_running:
                             return
