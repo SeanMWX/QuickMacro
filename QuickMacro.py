@@ -33,6 +33,8 @@ from controllers.hotkeys import HotkeyController
 from controllers.listen import ListenController
 from controllers.execute import ExecuteController
 
+RULES_PATH = 'rules.json'
+
 ######################################################################
 # Event hub and simple registries/rules
 ######################################################################
@@ -72,6 +74,7 @@ class RuleEngine:
         self.registry = registry or ActionRegistry()
         self.rules = rules or {}
         self.last_params = None
+        self.logger = None
         # Subscribe to known events
         self.event_hub.on('monitor_hit', lambda **kw: self.dispatch('monitor_hit', kw))
         self.event_hub.on('monitor_timeout', lambda **kw: self.dispatch('monitor_timeout', kw))
@@ -87,6 +90,7 @@ class RuleEngine:
             self.rules = dict(rules or {})
         except Exception:
             self.rules = {}
+        # ignore invalid values silently to keep app running
 
     def dispatch(self, event_name: str, payload: dict = None):
         if not event_name or not self.runner:
@@ -111,6 +115,8 @@ class RuleEngine:
         if not params.get('repeat'):
             params['repeat'] = 1
         try:
+            if callable(getattr(self.runner, '_log', None)):
+                self.runner._log(f"Rule hit: {event_name} -> {action_name}")
             self.runner.start(path, params, resume=False)
         except Exception:
             pass
@@ -768,6 +774,17 @@ SETTINGS_PATH = 'settings.json'
 
 def load_settings():
     return settings_mod.load_settings(SETTINGS_PATH)
+
+def load_rules(path: str = RULES_PATH) -> dict:
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            import json
+            data = json.load(f) or {}
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
 
 def compute_action_total_ms(path: str) -> int:
     try:

@@ -480,6 +480,12 @@ def run_app(qm):
         replay_params_provider=_get_replay_params,
         execute_controller_factory=lambda: ExecuteController(state, qm.ui_refs, command_adapter, release_all_inputs),
     )
+    try:
+        rules = qm.load_rules()
+        app_service.rule_engine.set_rules(rules)
+        log_event('Rules loaded.')
+    except Exception:
+        pass
     qm.app_service = app_service
 
 
