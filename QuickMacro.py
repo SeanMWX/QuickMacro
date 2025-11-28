@@ -34,7 +34,7 @@ from controllers.listen import ListenController
 from controllers.execute import ExecuteController
 
 ######################################################################
-# Event hub
+# Event hub and simple registries/rules
 ######################################################################
 class EventHub:
     def __init__(self):
@@ -51,6 +51,51 @@ class EventHub:
                 h(**kwargs)
             except Exception:
                 pass
+
+class ActionRegistry:
+    def __init__(self, base_dir='actions'):
+        self.base_dir = base_dir
+
+    def resolve(self, name: str) -> str:
+        if not name:
+            return ''
+        cand = os.path.join(self.base_dir, name)
+        if os.path.exists(cand):
+            return cand
+        return name if os.path.exists(name) else ''
+
+class RuleEngine:
+    """Minimal rule engine to react to events (e.g., monitor_hit) and trigger actions."""
+    def __init__(self, event_hub: EventHub, runner=None, registry: ActionRegistry = None, rules: dict = None):
+        self.event_hub = event_hub or EventHub()
+        self.runner = runner
+        self.registry = registry or ActionRegistry()
+        self.rules = rules or {}
+        self.last_params = None
+        self.event_hub.on('monitor_hit', self._on_monitor_hit)
+
+    def update_context(self, params: dict):
+        try:
+            self.last_params = dict(params or {})
+        except Exception:
+            self.last_params = None
+
+    def _on_monitor_hit(self, **_):
+        action_name = self.rules.get('monitor_hit')
+        if not action_name or not self.runner:
+            return
+        path = self.registry.resolve(action_name)
+        if not path:
+            return
+        params = dict(self.last_params or {})
+        params['action'] = action_name
+        if not params.get('repeat'):
+            params['repeat'] = 1
+        params['infinite'] = False
+        try:
+            self.runner.start(path, params, resume=False)
+        except Exception:
+            pass
 
 @dataclass
 class AppState:
@@ -137,6 +182,8 @@ class AppService:
         self._on_monitor_hit = self.hooks.get('on_monitor_hit')
         self.event_hub = event_hub or EventHub()
         self._execute_controller_factory = execute_controller_factory
+        self.action_registry = ActionRegistry()
+        self.rule_engine = RuleEngine(self.event_hub, runner=None, registry=self.action_registry, rules={})
         # runner init deferred until class is defined below
 
     def _log(self, msg: str):
@@ -205,6 +252,8 @@ class AppService:
                 hooks=self.hooks,
                 event_hub=self.event_hub,
             )
+            self.rule_engine.runner = self.runner
+        self.rule_engine.update_context(params)
         self.runner.start(action_path, params, resume=resume)
 
     def stop_replay(self):
@@ -328,7 +377,7 @@ class ActionRunner:
                     interval_s=3,
                     stop_callbacks=[_stop_current],
                     restart_callback=_restart_main,
-                    hit_callback=self._on_monitor_hit
+                    hit_callback=self._handle_monitor_hit
                 )
                 state.monitor_thread.start()
         except Exception:
@@ -390,6 +439,17 @@ class ActionRunner:
             self._log("Replay stop requested")
         try:
             self.event_hub.emit('replay_stopped', action=self.state.action_file_name)
+        except Exception:
+            pass
+
+    def _handle_monitor_hit(self, **kwargs):
+        try:
+            if callable(self._on_monitor_hit):
+                self._on_monitor_hit()
+        except Exception:
+            pass
+        try:
+            self.event_hub.emit('monitor_hit', action=self.state.action_file_name, **kwargs)
         except Exception:
             pass
 
