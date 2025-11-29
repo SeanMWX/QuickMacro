@@ -212,6 +212,26 @@ class RuleEngine:
                 self.seq_cycles_left -= 1
                 self.seq_idx = 0
             else:
+                # sequence finished
+                try:
+                    self.runner.state.can_start_listening = True
+                    self.runner.state.can_start_executing = True
+                except Exception:
+                    pass
+                if callable(getattr(self.runner, '_update_ui', None)):
+                    try:
+                        self.runner._update_ui(UiState.IDLE)
+                    except Exception:
+                        pass
+                if callable(getattr(self.runner, '_log', None)):
+                    try:
+                        self.runner._log("Sequence completed.")
+                    except Exception:
+                        pass
+                try:
+                    self.event_hub.emit('replay_stopped', action=self.main_action or self.runner.state.action_file_name)
+                except Exception:
+                    pass
                 return
         # advance until we find a valid action or exhaust
         attempts = 0
