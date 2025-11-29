@@ -1,0 +1,16 @@
+{
+  "//": "示例规则：超时跑一次 restart.action，然后回到序列循环",
+  "sequence": [
+    { "action": "twice_E.action", "repeat": 1 }
+  ],
+  "rules": {
+    "monitor_timeout": { "action": "restart.action", "repeat": 1 },
+    "monitor_image": {
+      "target": "assets/monitor_target.png",
+      "action": "委托密函确认选择.action",
+      "repeat": 1,
+      "run_seconds": 13,
+      "interval": 3.0
+    }
+  }
+}

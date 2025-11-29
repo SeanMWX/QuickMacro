@@ -87,6 +87,7 @@ class RuleEngine:
         # Subscribe to known events
         self.event_hub.on('monitor_hit', lambda **kw: self.dispatch('monitor_hit', kw))
         self.event_hub.on('monitor_timeout', lambda **kw: self.dispatch('monitor_timeout', kw))
+        self.event_hub.on('monitor_image_hit', lambda **kw: self.dispatch('monitor_image_hit', kw))
         self.event_hub.on('replay_stopped', lambda **kw: self._on_replay_stopped(kw))
         self.event_hub.on('replay_done', lambda **kw: self._on_replay_done(kw))
 
@@ -134,6 +135,8 @@ class RuleEngine:
         if not event_name or not self.runner:
             return
         rule = self.rules.get(event_name)
+        if (not rule) and payload and isinstance(payload, dict) and payload.get('rule'):
+            rule = payload.get('rule')
         if not rule:
             return
         if isinstance(rule, str):
@@ -160,9 +163,30 @@ class RuleEngine:
                 pass
             self.current_rule_action = action_name
             self.resume_main_pending = True if self.main_action else False
+            # if monitor_image_hit should restart sequence from beginning
+            if event_name == 'monitor_image_hit':
+                self.seq_idx = 0
+                # force loop even if no cycles left when infinite
+                if self.seq_infinite and not self.sequence:
+                    self.seq_infinite = True
             if callable(getattr(self.runner, '_log', None)):
                 self.runner._log(f"Rule hit: {event_name} -> {action_name}")
             self.runner.start(path, params, resume=False)
+            # optional cutback timer for monitor_image_hit
+            run_seconds = 0
+            if event_name == 'monitor_image_hit':
+                try:
+                    run_seconds = float(overrides.get('run_seconds', 0) or 0)
+                except Exception:
+                    run_seconds = 0
+                if run_seconds > 0:
+                    def _cutback():
+                        time.sleep(run_seconds)
+                        try:
+                            self.event_hub.emit('replay_done', action=action_name)
+                        except Exception:
+                            pass
+                    threading.Thread(target=_cutback, daemon=True).start()
         except Exception:
             pass
 
@@ -286,6 +310,7 @@ class AppState:
     monitor_loop_start_ts: float = None
     monitor_total_time_s: float = 0.0
     dungeon_start_ts: float = None
+    monitor_image_thread: object = None
     restart_timeout_ms: int = 3600000
     pending_main_action: str = None
     pending_main_playcount: int = None
@@ -502,6 +527,44 @@ class AppService:
                     self.rule_engine.main_params = dict(params)
                 except Exception:
                     pass
+                # optional secondary image monitor (top-level or rules.monitor_image)
+                try:
+                    img_rule = None
+                    if isinstance(rule_data, dict):
+                        if isinstance(rule_data.get('monitor_image'), dict):
+                            img_rule = rule_data.get('monitor_image')
+                        elif isinstance(rule_data.get('rules'), dict) and isinstance(rule_data['rules'].get('monitor_image'), dict):
+                            img_rule = rule_data['rules'].get('monitor_image')
+                    if img_rule and isinstance(img_rule, dict):
+                        target = img_rule.get('target') or ''
+                        if target and not os.path.exists(target):
+                            alt = os.path.join('assets', target)
+                            if os.path.exists(alt):
+                                target = alt
+                        interval = float(img_rule.get('interval', 2.0) or 2.0)
+                        if target and os.path.exists(target):
+                            # stop old
+                            try:
+                                if self.state.monitor_image_thread and getattr(self.state.monitor_image_thread, 'is_alive', lambda: False)():
+                                    self.state.monitor_image_thread.stop()
+                            except Exception:
+                                pass
+                            self.state.monitor_image_thread = MonitorThread(
+                                target_path=target,
+                                timeout_s=1e9,  # effectively no timeout
+                                interval_s=interval,
+                                stop_callbacks=[],
+                                restart_callback=None,
+                                hit_callback=lambda: self.event_hub.emit('monitor_image_hit', rule=img_rule)
+                            )
+                            self.state.monitor_image_thread.start()
+                            if callable(self._log):
+                                self._log(f"Monitor image armed: {target} interval={interval}s")
+                        else:
+                            if callable(self._log):
+                                self._log(f"Monitor image target not found: {target}")
+                except Exception:
+                    pass
             except Exception:
                 self._log('Failed to load rule file; abort.')
                 return
@@ -529,6 +592,11 @@ class AppService:
         if hasattr(self, 'runner') and self.runner:
             self.rule_engine.reset_resume_flag()
             self.runner.stop()
+        try:
+            if self.state.monitor_image_thread and getattr(self.state.monitor_image_thread, 'is_alive', lambda: False)():
+                self.state.monitor_image_thread.stop()
+        except Exception:
+            pass
 
     def toggle_record(self):
         if self.state.can_start_listening and self.state.can_start_executing:
