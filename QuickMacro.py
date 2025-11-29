@@ -244,9 +244,42 @@ class RuleEngine:
                 pass
 
     def _on_replay_done(self, payload: dict):
-        if self.resume_main_pending:
+        action = payload.get('action') if isinstance(payload, dict) else None
+        if self.resume_main_pending and action and self.current_rule_action:
+            # rule action finished; resume main immediately
             if self._log:
-                self._log('Replay done but resume_main_pending; waiting for resume.')
+                self._log('Rule action done; resuming main.')
+            self.resume_main_pending = False
+            self.current_rule_action = None
+            main_params = dict(self.main_params or {})
+            main_params['action'] = self.main_action
+            try:
+                if callable(getattr(self.runner, '_log', None)):
+                    self.runner._log(f"Resume main action after rule: {self.main_action}")
+                path = self.registry.resolve(self.main_action)
+                if path:
+                    self.runner.start(path, main_params, resume=False)
+            except Exception:
+                pass
+            # re-arm image monitor if configured
+            try:
+                cfg = getattr(self.runner.state, 'monitor_image_config', {}) or {}
+                target = cfg.get('target'); interval = float(cfg.get('interval', 2.0) or 2.0)
+                if target and os.path.exists(target):
+                    self.runner.state.monitor_image_thread = MonitorThread(
+                        target_path=target,
+                        timeout_s=1e9,
+                        interval_s=interval,
+                        stop_callbacks=[],
+                        restart_callback=None,
+                        hit_callback=lambda: self.event_hub.emit('monitor_image_hit', rule=cfg)
+                    )
+                    self.runner.state.monitor_image_thread.start()
+                    self.runner.state.monitor_image_suppress_until = time.time() + 1.0
+                    if callable(getattr(self.runner, '_log', None)):
+                        self.runner._log(f"Monitor image re-armed: {target}")
+            except Exception:
+                pass
             return
         if not self.sequence:
             return
