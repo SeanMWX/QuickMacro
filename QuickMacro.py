@@ -75,15 +75,27 @@ class RuleEngine:
         self.rules = rules or {}
         self.last_params = None
         self.logger = None
+        self.main_action = ''
+        self.main_params = {}
+        self.current_rule_action = None
+        self.resume_main_pending = False
         # Subscribe to known events
         self.event_hub.on('monitor_hit', lambda **kw: self.dispatch('monitor_hit', kw))
         self.event_hub.on('monitor_timeout', lambda **kw: self.dispatch('monitor_timeout', kw))
+        self.event_hub.on('replay_stopped', lambda **kw: self._on_replay_stopped(kw))
 
     def update_context(self, params: dict):
         try:
             self.last_params = dict(params or {})
         except Exception:
             self.last_params = None
+        # record main params whenever context updates for top-level action
+        try:
+            if params and params.get('action'):
+                self.main_action = str(params.get('action'))
+                self.main_params = dict(params)
+        except Exception:
+            pass
 
     def set_rules(self, rules: dict):
         try:
@@ -91,6 +103,10 @@ class RuleEngine:
         except Exception:
             self.rules = {}
         # ignore invalid values silently to keep app running
+
+    def reset_resume_flag(self):
+        self.resume_main_pending = False
+        self.current_rule_action = None
 
     def dispatch(self, event_name: str, payload: dict = None):
         if not event_name or not self.runner:
@@ -115,11 +131,38 @@ class RuleEngine:
         if not params.get('repeat'):
             params['repeat'] = 1
         try:
+            # Stop current run before switching to rule action to avoid overlap
+            try:
+                self.runner.stop()
+            except Exception:
+                pass
+            self.current_rule_action = action_name
+            self.resume_main_pending = True if self.main_action else False
             if callable(getattr(self.runner, '_log', None)):
                 self.runner._log(f"Rule hit: {event_name} -> {action_name}")
             self.runner.start(path, params, resume=False)
         except Exception:
             pass
+
+    def _on_replay_stopped(self, payload: dict):
+        try:
+            action = payload.get('action') if isinstance(payload, dict) else None
+        except Exception:
+            action = None
+        if self.resume_main_pending and action and self.current_rule_action and self.main_action:
+            # resume main action after rule action finishes
+            self.resume_main_pending = False
+            self.current_rule_action = None
+            main_params = dict(self.main_params or {})
+            main_params['action'] = self.main_action
+            try:
+                if callable(getattr(self.runner, '_log', None)):
+                    self.runner._log(f"Resume main action after rule: {self.main_action}")
+                path = self.registry.resolve(self.main_action)
+                if path:
+                    self.runner.start(path, main_params, resume=False)
+            except Exception:
+                pass
 
 @dataclass
 class AppState:
@@ -293,6 +336,13 @@ class AppService:
         if not name:
             self._log('Please select an action file.')
             return
+        # update main context for potential resume
+        try:
+            self.rule_engine.main_action = name
+            self.rule_engine.main_params = dict(params)
+            self.rule_engine.reset_resume_flag()
+        except Exception:
+            pass
         action_path = self._resolve_action_path(name)
         # If a .rule file is selected, load rules and switch to configured main action
         if name.lower().endswith('.rule'):
@@ -314,6 +364,11 @@ class AppService:
                     return
                 name = main_action.strip()
                 action_path = self._resolve_action_path(name)
+                try:
+                    self.rule_engine.main_action = name
+                    self.rule_engine.main_params = dict(params)
+                except Exception:
+                    pass
             except Exception:
                 self._log('Failed to load rule file; abort.')
                 return
@@ -339,6 +394,7 @@ class AppService:
 
     def stop_replay(self):
         if hasattr(self, 'runner') and self.runner:
+            self.rule_engine.reset_resume_flag()
             self.runner.stop()
 
     def toggle_record(self):
