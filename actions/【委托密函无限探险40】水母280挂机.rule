@@ -6,7 +6,7 @@
   "rules": {
     "monitor_timeout": { "action": "restart.action", "repeat": 1 },
     "monitor_image": {
-      "target": "assets/monitor_target.png",
+      "target": "assets/choose.png",
       "action": "委托密函确认选择.action",
       "repeat": 1,
       "run_seconds": 13,

@@ -83,6 +83,8 @@ class RuleEngine:
         self.seq_idx = 0
         self.seq_cycles_left = 0
         self.seq_infinite = False
+        self.last_image_hit_ts = 0.0
+        self.image_suppress_until = 0.0
         self._log = None
         # Subscribe to known events
         self.event_hub.on('monitor_hit', lambda **kw: self.dispatch('monitor_hit', kw))
@@ -155,6 +157,14 @@ class RuleEngine:
         params['action'] = action_name
         if not params.get('repeat'):
             params['repeat'] = 1
+        now = time.time()
+        if event_name == 'monitor_image_hit':
+            if now < self.runner.state.monitor_image_suppress_until or self.resume_main_pending:
+                return
+            try:
+                run_seconds = float(overrides.get('run_seconds', 0) or 0)
+            except Exception:
+                run_seconds = 0
         try:
             # Stop current run before switching to rule action to avoid overlap
             try:
@@ -169,24 +179,28 @@ class RuleEngine:
                 # force loop even if no cycles left when infinite
                 if self.seq_infinite and not self.sequence:
                     self.seq_infinite = True
+                # pause image monitor during rule action
+                try:
+                    if self.runner.state.monitor_image_thread and getattr(self.runner.state.monitor_image_thread, 'is_alive', lambda: False)():
+                        self.runner.state.monitor_image_thread.stop()
+                except Exception:
+                    pass
+                try:
+                    self.runner.state.monitor_image_suppress_until = now + max(run_seconds, 0)
+                except Exception:
+                    pass
             if callable(getattr(self.runner, '_log', None)):
                 self.runner._log(f"Rule hit: {event_name} -> {action_name}")
             self.runner.start(path, params, resume=False)
             # optional cutback timer for monitor_image_hit
-            run_seconds = 0
-            if event_name == 'monitor_image_hit':
-                try:
-                    run_seconds = float(overrides.get('run_seconds', 0) or 0)
-                except Exception:
-                    run_seconds = 0
-                if run_seconds > 0:
-                    def _cutback():
-                        time.sleep(run_seconds)
-                        try:
-                            self.event_hub.emit('replay_done', action=action_name)
-                        except Exception:
-                            pass
-                    threading.Thread(target=_cutback, daemon=True).start()
+            if event_name == 'monitor_image_hit' and run_seconds > 0:
+                def _cutback():
+                    time.sleep(run_seconds)
+                    try:
+                        self.event_hub.emit('replay_done', action=action_name)
+                    except Exception:
+                        pass
+                threading.Thread(target=_cutback, daemon=True).start()
         except Exception:
             pass
 
@@ -207,6 +221,25 @@ class RuleEngine:
                 path = self.registry.resolve(self.main_action)
                 if path:
                     self.runner.start(path, main_params, resume=False)
+            except Exception:
+                pass
+            # re-arm image monitor if configured
+            try:
+                cfg = getattr(self.runner.state, 'monitor_image_config', {}) or {}
+                target = cfg.get('target'); interval = float(cfg.get('interval', 2.0) or 2.0)
+                if target and os.path.exists(target):
+                    self.runner.state.monitor_image_thread = MonitorThread(
+                        target_path=target,
+                        timeout_s=1e9,
+                        interval_s=interval,
+                        stop_callbacks=[],
+                        restart_callback=None,
+                        hit_callback=lambda: self.event_hub.emit('monitor_image_hit', rule=cfg)
+                    )
+                    self.runner.state.monitor_image_thread.start()
+                    self.runner.state.monitor_image_suppress_until = time.time() + 1.0
+                    if callable(getattr(self.runner, '_log', None)):
+                        self.runner._log(f"Monitor image re-armed: {target}")
             except Exception:
                 pass
 
@@ -311,6 +344,8 @@ class AppState:
     monitor_total_time_s: float = 0.0
     dungeon_start_ts: float = None
     monitor_image_thread: object = None
+    monitor_image_config: dict = field(default_factory=dict)
+    monitor_image_suppress_until: float = 0.0
     restart_timeout_ms: int = 3600000
     pending_main_action: str = None
     pending_main_playcount: int = None
@@ -543,6 +578,7 @@ class AppService:
                                 target = alt
                         interval = float(img_rule.get('interval', 2.0) or 2.0)
                         if target and os.path.exists(target):
+                            self.state.monitor_image_config = {'target': target, 'interval': interval, **img_rule}
                             # stop old
                             try:
                                 if self.state.monitor_image_thread and getattr(self.state.monitor_image_thread, 'is_alive', lambda: False)():
@@ -551,7 +587,7 @@ class AppService:
                                 pass
                             self.state.monitor_image_thread = MonitorThread(
                                 target_path=target,
-                                timeout_s=1e9,  # effectively no timeout
+                                timeout_s=1e9,
                                 interval_s=interval,
                                 stop_callbacks=[],
                                 restart_callback=None,
