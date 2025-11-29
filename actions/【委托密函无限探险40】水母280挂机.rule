@@ -5,12 +5,6 @@
   ],
   "rules": {
     "monitor_timeout": { "action": "restart.action", "repeat": 1 },
-    "monitor_image": {
-      "target": "assets/choose.png",
-      "action": "委托密函确认选择.action",
-      "repeat": 1,
-      "run_seconds": 13,
-      "interval": 3.0
-    }
+    "monitor_image": { "target": "assets/choose.png", "action": "choose.action", "repeat": 1, "run_seconds": 13, "interval": 3.0 }
   }
 }
