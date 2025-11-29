@@ -79,10 +79,16 @@ class RuleEngine:
         self.main_params = {}
         self.current_rule_action = None
         self.resume_main_pending = False
+        self.sequence = []
+        self.seq_idx = 0
+        self.seq_cycles_left = 0
+        self.seq_infinite = False
+        self._log = None
         # Subscribe to known events
         self.event_hub.on('monitor_hit', lambda **kw: self.dispatch('monitor_hit', kw))
         self.event_hub.on('monitor_timeout', lambda **kw: self.dispatch('monitor_timeout', kw))
         self.event_hub.on('replay_stopped', lambda **kw: self._on_replay_stopped(kw))
+        self.event_hub.on('replay_done', lambda **kw: self._on_replay_done(kw))
 
     def update_context(self, params: dict):
         try:
@@ -107,6 +113,22 @@ class RuleEngine:
     def reset_resume_flag(self):
         self.resume_main_pending = False
         self.current_rule_action = None
+        self.sequence = []
+        self.seq_idx = 0
+        self.seq_cycles_left = 0
+        self.seq_infinite = False
+
+    def load_sequence(self, seq: list, cycles: int = 1, infinite: bool = False):
+        try:
+            self.sequence = list(seq or [])
+        except Exception:
+            self.sequence = []
+        self.seq_idx = 0
+        try:
+            self.seq_cycles_left = max(0, int(cycles or 0) - 1)
+        except Exception:
+            self.seq_cycles_left = 0
+        self.seq_infinite = bool(infinite)
 
     def dispatch(self, event_name: str, payload: dict = None):
         if not event_name or not self.runner:
@@ -163,6 +185,65 @@ class RuleEngine:
                     self.runner.start(path, main_params, resume=False)
             except Exception:
                 pass
+
+    def _on_replay_done(self, payload: dict):
+        if self.resume_main_pending:
+            if self._log:
+                self._log('Replay done but resume_main_pending; waiting for resume.')
+            return
+        if not self.sequence:
+            return
+        if self._log:
+            try:
+                self._log(f"Replay done; advancing sequence idx={self.seq_idx} len={len(self.sequence)} cycles_left={self.seq_cycles_left} inf={self.seq_infinite}")
+            except Exception:
+                pass
+        # allow next action to start
+        try:
+            self.runner.state.can_start_listening = True
+            self.runner.state.can_start_executing = True
+        except Exception:
+            pass
+        self.seq_idx += 1
+        if self.seq_idx >= len(self.sequence):
+            if self.seq_infinite:
+                self.seq_idx = 0
+            elif self.seq_cycles_left > 0:
+                self.seq_cycles_left -= 1
+                self.seq_idx = 0
+            else:
+                return
+        # advance until we find a valid action or exhaust
+        attempts = 0
+        max_attempts = len(self.sequence)
+        while attempts < max_attempts:
+            item = self.sequence[self.seq_idx] if self.seq_idx < len(self.sequence) else None
+            attempts += 1
+            if not item:
+                break
+            try:
+                action_name = item.get('action') or ''
+                repeat = int(item.get('repeat') or 1)
+            except Exception:
+                action_name = ''
+                repeat = 1
+            path = self.registry.resolve(action_name)
+            if not path:
+                if callable(getattr(self.runner, '_log', None)):
+                    self.runner._log(f"Sequence skipped missing action: {action_name}")
+                self.seq_idx = (self.seq_idx + 1) % len(self.sequence)
+                continue
+            params = dict(self.main_params or {})
+            params['action'] = action_name
+            params['repeat'] = repeat
+            params['infinite'] = False
+            try:
+                if callable(getattr(self.runner, '_log', None)):
+                    self.runner._log(f"Sequence next: {action_name} (idx {self.seq_idx})")
+                self.runner.start(path, params, resume=False)
+            except Exception:
+                pass
+            break
 
 @dataclass
 class AppState:
@@ -251,6 +332,16 @@ class AppService:
         self._execute_controller_factory = execute_controller_factory
         self.action_registry = ActionRegistry()
         self.rule_engine = RuleEngine(self.event_hub, runner=None, registry=self.action_registry, rules={})
+        # wire finish callback if controller already exists
+        try:
+            if self.execute_controller:
+                self.execute_controller.on_finished = lambda: self.event_hub.emit('replay_done', action=self.state.action_file_name)
+        except Exception:
+            pass
+        try:
+            self.rule_engine._log = self.hooks.get('log_event')
+        except Exception:
+            pass
     def start_record(self):
         if not (self.state.can_start_listening and self.state.can_start_executing):
             return
@@ -320,8 +411,13 @@ class AppService:
     def _ensure_execute_controller(self):
         if self.execute_controller and self.execute_controller.is_alive():
             return self.execute_controller
+        # if existing but dead, discard and create new
         if callable(self._execute_controller_factory):
             self.execute_controller = self._execute_controller_factory()
+            try:
+                self.execute_controller.on_finished = lambda: self.event_hub.emit('replay_done', action=self.state.action_file_name)
+            except Exception:
+                pass
             return self.execute_controller
         return None
 
@@ -353,8 +449,23 @@ class AppService:
                     self.rule_engine.set_rules(rules_body)
                     if callable(self._log):
                         self._log(f"Loaded rules from {name}")
+                seq = []
+                if isinstance(rule_data, dict) and isinstance(rule_data.get('sequence'), list):
+                    seq = rule_data.get('sequence')
                 main_action = ''
-                if isinstance(rule_data, dict):
+                try:
+                    # cycles from UI repeat, infinite from params
+                    cycles = params.get('repeat', 1)
+                    inf = bool(params.get('infinite'))
+                    if seq:
+                        self.rule_engine.load_sequence(seq, cycles=cycles, infinite=inf)
+                        if seq[0].get('action'):
+                            main_action = str(seq[0].get('action'))
+                            params['action'] = main_action
+                except Exception:
+                    pass
+                # Only fall back to explicit action if no sequence was provided
+                if not main_action and isinstance(rule_data, dict):
                     for k in ('action', 'main_action', 'start_action'):
                         if rule_data.get(k):
                             main_action = str(rule_data.get(k))
@@ -428,8 +539,11 @@ class ActionRunner:
         self._mark_interrupted = self.hooks.get('mark_interrupted')
         self._mark_finished = self.hooks.get('mark_finished')
         self._on_monitor_hit = self.hooks.get('on_monitor_hit')
+        self._run_token = 0
 
     def start(self, action_path: str, params: dict, resume: bool = False):
+        self._run_token += 1
+        my_token = self._run_token
         state = self.state
         state.action_file_name = action_path
         try:
@@ -550,6 +664,22 @@ class ActionRunner:
                 )
             except Exception:
                 pass
+        # watcher to emit replay_done on natural completion (finite runs only)
+        try:
+            if not params.get('infinite') and state.current_replayer:
+                def _watch():
+                    try:
+                        state.current_replayer.join()
+                    except Exception:
+                        return
+                    try:
+                        self.event_hub.emit('replay_done', action=state.action_file_name)
+                    except Exception:
+                        pass
+                t = threading.Thread(target=_watch, daemon=True)
+                t.start()
+        except Exception:
+            pass
         try:
             ctrl = self.execute_controller_supplier() if callable(self.execute_controller_supplier) else None
             if ctrl and not ctrl.is_alive():
@@ -562,11 +692,27 @@ class ActionRunner:
             self.event_hub.emit('replay_started', action=state.action_file_name, repeat=repeat)
         except Exception:
             pass
+        # fallback watchdog to emit replay_done if execution hangs (finite runs only)
+        if not params.get('infinite'):
+            duration_s = max(1.0, (total_ms/1000.0) * max(1, repeat) + 1.0)
+            def _watch():
+                time.sleep(duration_s)
+                if self._run_token != my_token:
+                    return
+                try:
+                    self.event_hub.emit('replay_done', action=state.action_file_name)
+                except Exception:
+                    pass
+            threading.Thread(target=_watch, daemon=True).start()
 
     def stop(self):
         try:
             self.state.ev_stop_execute_keyboard.set()
             self.state.ev_stop_execute_mouse.set()
+        except Exception:
+            pass
+        try:
+            self.event_hub.emit('replay_done', action=self.state.action_file_name)
         except Exception:
             pass
         self.state.can_start_listening = True

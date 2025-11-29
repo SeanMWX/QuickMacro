@@ -1,0 +1,10 @@
+{
+  "//": "示例规则：超时跑一次 restart.action，然后回到序列循环 A/B/B/C；默认序列无限循环取决于 UI 的 Inf/Repeat 设置",
+  "sequence": [
+    { "action": "example.action", "repeat": 1 }
+  ],
+  "rules": {
+    "monitor_timeout": { "action": "restart.action", "repeat": 1 }
+  },
+  "action": "example.action"
+}

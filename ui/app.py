@@ -464,7 +464,7 @@ def run_app(qm):
         recording_controller=recording_controller,
         playback_controller=playback_controller,
         listen_controller=listen_controller,
-        execute_controller=execute_controller,
+        execute_controller=None,  # let service create with proper on_finished hook
         start_monitor=start_monitor,
         compute_action_total_ms=compute_action_total_ms,
         get_restart_timeout_ms=get_restart_timeout_ms,
@@ -478,7 +478,13 @@ def run_app(qm):
             'on_monitor_hit': on_monitor_hit,
         },
         replay_params_provider=_get_replay_params,
-        execute_controller_factory=lambda: ExecuteController(state, qm.ui_refs, command_adapter, release_all_inputs),
+        execute_controller_factory=lambda: ExecuteController(
+            state,
+            qm.ui_refs,
+            command_adapter,
+            release_all_inputs,
+            on_finished=lambda: qm.app_service.event_hub.emit('replay_done', action=state.action_file_name)
+        ),
     )
     try:
         rules = qm.load_rules()

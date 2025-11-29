@@ -12,13 +12,14 @@ def _safe_set(ev):
 
 
 class ExecuteController(threading.Thread):
-    def __init__(self, state, ui_refs=None, command_adapter=None, release_all_inputs=None):
+    def __init__(self, state, ui_refs=None, command_adapter=None, release_all_inputs=None, on_finished=None):
         super().__init__()
         self.daemon = True
         self.state = state
         self.ui_refs = ui_refs
         self.command_adapter = command_adapter
         self.release_all_inputs = release_all_inputs
+        self.on_finished = on_finished
 
     def run(self):
         keyboardListener = keyboard.Listener(on_release=lambda key: None)
@@ -122,6 +123,11 @@ class ExecuteController(threading.Thread):
                         except Exception:
                             pass
                     self.ui_refs.root.after(0, _resume_main)
+        except Exception:
+            pass
+        try:
+            if callable(self.on_finished):
+                self.on_finished()
         except Exception:
             pass
         keyboardListener.stop()
