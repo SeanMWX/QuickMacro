@@ -3,7 +3,7 @@
   "sequence": [
     { "action": "s.action", "repeat": 1 },
     { "action": "w.action", "repeat": 1 },
-    { "action": "leftmouse.action", "repeat": 1 },
+    { "action": "leftmouse.action", "repeat": 4 },
     { "action": "rightmouse.action", "repeat": 1 }
   ],
   "rules": {

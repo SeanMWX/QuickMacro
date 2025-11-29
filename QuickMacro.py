@@ -482,6 +482,8 @@ class AppService:
                         if seq[0].get('action'):
                             main_action = str(seq[0].get('action'))
                             params['action'] = main_action
+                        # sequence自循环，不使用单步无限标记
+                        params['infinite'] = False
                 except Exception:
                     pass
                 # Only fall back to explicit action if no sequence was provided
